@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from ui.ai_section import render_ai_insights 
 
 def _render_prop_firm_header(details: dict):
     """Renders the header for Prop Firm Challenge or Funded Account types."""

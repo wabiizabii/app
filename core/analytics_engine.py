@@ -561,16 +561,19 @@ def find_user_strengths(
 
 # (วางโค้ดนี้ต่อท้ายในไฟล์ core/analytics_engine.py)
 
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+
 def get_advanced_statistics(df_all_actual_trades: pd.DataFrame, active_portfolio_id: str) -> dict:
-   
     if df_all_actual_trades.empty or not active_portfolio_id:
         return {}
 
     df = df_all_actual_trades[df_all_actual_trades['PortfolioID'] == active_portfolio_id].copy()
-    
-    # --- เตรียมข้อมูลพื้นฐาน ---
-    if 'Symbol_Deal' in df.columns:
-        df.rename(columns={'Symbol_Deal': 'Symbol'}, inplace=True)
     
     trade_types_to_exclude = ['balance', 'credit', 'deposit', 'withdrawal']
     df = df[~df['Type_Deal'].str.lower().isin(trade_types_to_exclude)].copy()
@@ -579,48 +582,40 @@ def get_advanced_statistics(df_all_actual_trades: pd.DataFrame, active_portfolio
         return {}
         
     df['Time_Deal'] = pd.to_datetime(df['Time_Deal'])
-    df = df.sort_values(by='Time_Deal', ascending=False) # เรียงจากล่าสุดไปเก่าสุด
+    df = df.sort_values(by='Time_Deal', ascending=False)
     df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
-    df['Direction'] = np.where(df['Type_Deal'].str.lower() == 'buy', 'Long', 'Short')
 
-    # --- เริ่มการคำนวณสถิติต่างๆ ---
+    # [แก้ไข] เพิ่ม .str.strip() เพื่อตัดช่องว่าง และ .str.upper() เพื่อให้เป็นมาตรฐาน
+    if 'DealDirection' in df.columns and not df['DealDirection'].isnull().all():
+        df['Direction'] = df['DealDirection'].str.strip().str.upper()
+    else:
+        df['Direction'] = np.where(df['Type_Deal'].str.lower() == 'buy', 'LONG', 'SHORT')
+
     results = {}
 
-    # 1. ฟอร์ม 5 เทรดล่าสุด (แยก Long/Short)
     def _get_recent_form(df_direction, n=5):
         if df_direction.empty: return "N/A"
         recent_trades = df_direction.head(n)
-        form = []
-        for profit in recent_trades['Profit_Deal']:
-            if profit > 0: form.append("W")
-            elif profit < 0: form.append("L")
-            else: form.append("B")
+        form = ["W" if p > 0 else "L" if p < 0 else "B" for p in recent_trades['Profit_Deal']]
         return "-".join(form)
 
-    df_long = df[df['Direction'] == 'Long']
-    df_short = df[df['Direction'] == 'Short']
+    df_long = df[df['Direction'] == 'LONG']
+    df_short = df[df['Direction'] == 'SHORT']
     
     results['recent_form_long'] = _get_recent_form(df_long)
     results['recent_form_short'] = _get_recent_form(df_short)
 
-    # 2. กำไร/ขาดทุนสูงสุด (แยก Long/Short)
     results['biggest_win_long'] = df_long[df_long['Profit_Deal'] > 0]['Profit_Deal'].max()
     results['biggest_loss_long'] = df_long[df_long['Profit_Deal'] < 0]['Profit_Deal'].min()
     results['biggest_win_short'] = df_short[df_short['Profit_Deal'] > 0]['Profit_Deal'].max()
     results['biggest_loss_short'] = df_short[df_short['Profit_Deal'] < 0]['Profit_Deal'].min()
-
-    # 3. Win Rate (แยก Long/Short)
-    results['win_rate_long'] = (df_long['Profit_Deal'] > 0).sum() / len(df_long) * 100 if not df_long.empty else 0
-    results['win_rate_short'] = (df_short['Profit_Deal'] > 0).sum() / len(df_short) * 100 if not df_short.empty else 0
-
-    # 4. ชนะ/แพ้ติดต่อกันนานที่สุด (Overall)
-    df_rev = df.iloc[::-1].copy() # เรียงจากเก่าไปใหม่เพื่อคำนวณ streak
-    df_rev['outcome'] = np.sign(df_rev['Profit_Deal']) # 1 for win, -1 for loss, 0 for BE
+    
+    df_rev = df.iloc[::-1].copy()
+    df_rev['outcome'] = np.sign(df_rev['Profit_Deal'])
     streaks = df_rev['outcome'].groupby((df_rev['outcome'] != df_rev['outcome'].shift()).cumsum()).cumcount() + 1
     results['max_consecutive_wins'] = streaks[df_rev['outcome'] == 1].max()
     results['max_consecutive_losses'] = streaks[df_rev['outcome'] == -1].max()
 
-    # 5. Consistency Score
     total_profit = df[df['Profit_Deal'] > 0]['Profit_Deal'].sum()
     if total_profit > 0:
         daily_pnl = df.groupby(df['Time_Deal'].dt.date)['Profit_Deal'].sum()
@@ -638,72 +633,131 @@ def get_advanced_statistics(df_all_actual_trades: pd.DataFrame, active_portfolio
 
 def get_full_dashboard_stats(df_all_actual_trades: pd.DataFrame, df_all_summaries: pd.DataFrame, active_portfolio_id: str) -> dict:
     """
-    [แก้ไข] เพิ่ม parameter df_all_summaries เพื่อให้รับข้อมูลได้ถูกต้อง
+    [Final v4] แก้ไขชื่อคอลัมน์ 'DealVolume' -> 'Volume_Deal' ให้ถูกต้อง
     """
-    # --- ตั้งค่าผลลัพธ์เริ่มต้น ---
-    stats = {
-        'total_trades': 0, 'profit_trades': 0, 'loss_trades': 0,
-        'long_trades_count': 0, 'short_trades_count': 0,
-        'gross_profit': 0.0, 'gross_loss': 0.0, 'total_net_profit': 0.0,
-        'profit_factor': 0.0, 'win_rate': 0.0,
-        'best_profit': 0.0, 'biggest_loss': 0.0,
-        'avg_profit': 0.0, 'avg_loss': 0.0,
-        'expectancy': 0.0,
-        'today_pnl_actual': 0.0,
-        'active_trading_days_total': 0
-    }
+    stats = {}
 
+    # --- ส่วนที่ 1: คำนวณค่าพื้นฐานจาก ActualTrades (ส่วนที่ทำงานดีอยู่แล้ว) ---
+    if not df_all_actual_trades.empty and active_portfolio_id:
+        df = df_all_actual_trades[df_all_actual_trades['PortfolioID'] == active_portfolio_id].copy()
+        trade_types_to_exclude = ['balance', 'credit', 'deposit', 'withdrawal']
+        df = df[~df['Type_Deal'].str.lower().isin(trade_types_to_exclude)]
+        
+        if not df.empty:
+            df['Time_Deal'] = pd.to_datetime(df['Time_Deal'])
+            df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
+            
+            if 'DealDirection' in df.columns and not df['DealDirection'].isnull().all():
+                df['Direction'] = df['DealDirection'].str.strip().str.upper()
+            else:
+                df['Direction'] = np.where(df['Type_Deal'].str.lower() == 'buy', 'LONG', 'SHORT')
+
+            # --- [แก้ไข] เปลี่ยน 'DealVolume' เป็น 'Volume_Deal' ---
+            if 'Volume_Deal' in df.columns:
+                stats['avg_trade_size'] = pd.to_numeric(df['Volume_Deal'], errors='coerce').mean()
+            else:
+                stats['avg_trade_size'] = 0.0
+            # ---------------------------------------------------
+
+            stats['total_trades'] = len(df)
+            stats['profit_trades'] = int((df['Profit_Deal'] > 0).sum())
+            stats['loss_trades'] = int((df['Profit_Deal'] < 0).sum())
+            stats['breakeven_trades'] = int((df['Profit_Deal'] == 0).sum())
+            stats['long_trades'] = int((df['Direction'] == 'LONG').sum())
+            stats['short_trades'] = int((df['Direction'] == 'SHORT').sum())
+            stats['gross_profit'] = df[df['Profit_Deal'] > 0]['Profit_Deal'].sum()
+            stats['gross_loss'] = df[df['Profit_Deal'] < 0]['Profit_Deal'].sum()
+            stats['total_net_profit'] = stats['gross_profit'] + stats['gross_loss']
+            stats['win_rate'] = (stats['profit_trades'] / stats['total_trades']) * 100 if stats['total_trades'] > 0 else 0
+            stats['profit_factor'] = stats['gross_profit'] / abs(stats['gross_loss']) if stats['gross_loss'] != 0 else 0
+            stats['best_profit'] = df['Profit_Deal'].max()
+            stats['biggest_loss'] = df['Profit_Deal'].min()
+            stats['avg_profit'] = stats['gross_profit'] / stats['profit_trades'] if stats['profit_trades'] > 0 else 0
+            stats['avg_loss'] = stats['gross_loss'] / stats['loss_trades'] if stats['loss_trades'] > 0 else 0
+            win_rate_frac = stats.get('win_rate', 0) / 100
+            stats['expectancy'] = (win_rate_frac * stats.get('avg_profit', 0)) - ((1 - win_rate_frac) * abs(stats.get('avg_loss', 0)))
+            
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            stats['today_pnl_actual'] = df[df['Time_Deal'].dt.strftime('%Y-%m-%d') == today_str]['Profit_Deal'].sum()
+            stats['active_trading_days_total'] = df['Time_Deal'].dt.normalize().nunique()
+
+    # --- ส่วนที่ 2: เขียนทับด้วยข้อมูลจาก StatementSummaries ---
+    if not df_all_summaries.empty and active_portfolio_id:
+        summary_row = df_all_summaries[df_all_summaries['PortfolioID'] == active_portfolio_id]
+        if not summary_row.empty:
+            summary_data = summary_row.iloc[0]
+
+            def to_numeric_safe(series_val):
+                if pd.isna(series_val) or str(series_val).strip() == '': return np.nan
+                if isinstance(series_val, (int, float)): return series_val
+                cleaned_val = str(series_val).replace('$', '').replace('%', '').replace(',', '').strip()
+                return pd.to_numeric(cleaned_val, errors='coerce')
+
+            override_map = {
+                'Total_Long_Trades': 'long_trades',
+                'Total_Short_Trades': 'short_trades',
+                'Avg. Trade Size': 'avg_trade_size', # จะถูกเขียนทับถ้ามีใน summary
+                'Expected Payoff': 'expectancy'
+            }
+
+            for sheet_col, stats_key in override_map.items():
+                if sheet_col in summary_data:
+                    summary_value = to_numeric_safe(summary_data[sheet_col])
+                    if pd.notna(summary_value):
+                        stats[stats_key] = summary_value
+
+    return stats
+def get_ai_powered_insights(df_all_actual_trades: pd.DataFrame, active_portfolio_id: str) -> dict:
+    """
+    วิเคราะห์ข้อมูลการเทรดเพื่อหาข้อมูลเชิงลึกที่น่าสนใจ
+    - วันที่เทรดดีที่สุด/แย่ที่สุด
+    - คู่เงินที่ทำกำไร/ขาดทุนมากที่สุด
+    - ประสิทธิภาพ Long vs. Short
+    """
     if df_all_actual_trades.empty or not active_portfolio_id:
-        return stats
+        return {}
 
     df = df_all_actual_trades[df_all_actual_trades['PortfolioID'] == active_portfolio_id].copy()
     
-    if 'Symbol_Deal' in df.columns:
-        df.rename(columns={'Symbol_Deal': 'Symbol'}, inplace=True)
-    
     trade_types_to_exclude = ['balance', 'credit', 'deposit', 'withdrawal']
-    df = df[~df['Type_Deal'].str.lower().isin(trade_types_to_exclude)].copy()
+    df = df[~df['Type_Deal'].str.lower().isin(trade_types_to_exclude)]
     
     if df.empty:
-        return stats
-        
+        return {}
+
+    # --- ตรรกะการวิเคราะห์ข้อมูล ---
     df['Time_Deal'] = pd.to_datetime(df['Time_Deal'])
     df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
-    df['Direction'] = np.where(df['Type_Deal'].str.lower() == 'buy', 'Long', 'Short')
-
-    # --- 1. คำนวณสถิติสำหรับตาราง "Advanced Statistics" ---
-    stats['total_trades'] = len(df)
-    stats['profit_trades'] = (df['Profit_Deal'] > 0).sum()
-    stats['loss_trades'] = (df['Profit_Deal'] < 0).sum()
-    stats['long_trades_count'] = (df['Direction'] == 'Long').sum()
-    stats['short_trades_count'] = (df['Direction'] == 'Short').sum()
     
-    stats['gross_profit'] = df[df['Profit_Deal'] > 0]['Profit_Deal'].sum()
-    stats['gross_loss'] = df[df['Profit_Deal'] < 0]['Profit_Deal'].sum()
-    stats['total_net_profit'] = stats['gross_profit'] + stats['gross_loss']
-    
-    stats['win_rate'] = (stats['profit_trades'] / stats['total_trades']) * 100 if stats['total_trades'] > 0 else 0
-    stats['profit_factor'] = stats['gross_profit'] / abs(stats['gross_loss']) if stats['gross_loss'] != 0 else 0
-    
-    stats['best_profit'] = df['Profit_Deal'].max()
-    stats['biggest_loss'] = df['Profit_Deal'].min()
-    
-    stats['avg_profit'] = stats['gross_profit'] / stats['profit_trades'] if stats['profit_trades'] > 0 else 0
-    stats['avg_loss'] = stats['gross_loss'] / stats['loss_trades'] if stats['loss_trades'] > 0 else 0
+    if 'DealDirection' in df.columns and not df['DealDirection'].isnull().all():
+        df['Direction'] = df['DealDirection'].str.strip().str.upper()
+    else:
+        df['Direction'] = np.where(df['Type_Deal'].str.lower() == 'buy', 'LONG', 'SHORT')
 
-    if not df_all_summaries.empty:
-        df_summary = df_all_summaries[df_all_summaries['PortfolioID'] == active_portfolio_id].copy()
-        if not df_summary.empty and 'Expected_Payoff' in df_summary.columns:
-        # ดึงค่ามาเป็นตัวแปรเดียวก่อน
-            payoff_value = df_summary['Expected_Payoff'].iloc[-1]
-        # แปลงเป็นตัวเลข ถ้าแปลงไม่ได้จะเป็น NaN
-            numeric_payoff = pd.to_numeric(payoff_value, errors='coerce')
-        # ถ้าเป็น NaN ให้ใช้ 0, ถ้าไม่ใช่ ก็ใช้ค่าที่แปลงแล้ว
-            stats['expectancy'] = 0 if pd.isna(numeric_payoff) else numeric_payoff
+    if 'Symbol_Deal' in df.columns:
+        df.rename(columns={'Symbol_Deal': 'Symbol'}, inplace=True, errors='ignore')
+    
+    insights = {}
 
-    # --- 2. คำนวณสถิติสำหรับ "Objective Cards" ---
-    today_str = datetime.now().strftime('%Y-%m-%d')
-    stats['today_pnl_actual'] = df[df['Time_Deal'].dt.strftime('%Y-%m-%d') == today_str]['Profit_Deal'].sum()
-    stats['active_trading_days_total'] = df['Time_Deal'].dt.normalize().nunique()
+    # 1. วิเคราะห์วันที่เทรดดีที่สุด/แย่ที่สุด
+    df['day_of_week'] = df['Time_Deal'].dt.day_name()
+    daily_pnl = df.groupby('day_of_week')['Profit_Deal'].sum()
+    if not daily_pnl.empty:
+        insights['best_day'] = (daily_pnl.idxmax(), daily_pnl.max())
+        insights['worst_day'] = (daily_pnl.idxmin(), daily_pnl.min())
 
-    return stats
+    # 2. วิเคราะห์คู่เงินที่ทำกำไร/ขาดทุนมากที่สุด
+    if 'Symbol' in df.columns:
+        symbol_pnl = df.groupby('Symbol')['Profit_Deal'].sum()
+        if not symbol_pnl.empty:
+            insights['best_pair'] = (symbol_pnl.idxmax(), symbol_pnl.max())
+            insights['worst_pair'] = (symbol_pnl.idxmin(), symbol_pnl.min())
+
+    # 3. วิเคราะห์ประสิทธิภาพ Long vs. Short
+    direction_pnl = df.groupby('Direction')['Profit_Deal'].sum()
+    insights['long_vs_short_pnl'] = (
+        direction_pnl.get('LONG', 0.0),
+        direction_pnl.get('SHORT', 0.0)
+    )
+    
+    return insights

@@ -127,3 +127,43 @@ def render_ai_section():
                 except Exception as e:
                     st.error("❌ เกิดข้อผิดพลาดระหว่างการวิเคราะห์เชิงลึก")
                     st.exception(e)
+
+def render_ai_insights(insights: dict):
+    """
+    แสดงผลข้อมูล AI-Powered Insights ที่คำนวณมาจาก analytics_engine
+    """
+    if not insights:
+        st.info("มีข้อมูลไม่เพียงพอสำหรับสร้าง Insights")
+        return
+
+    col1, col2, col3 = st.columns(3)
+
+    # ส่วนที่ 1: Performance by Day
+    with col1:
+        st.markdown("##### 📅 By Day")
+        best_day, best_day_pnl = insights.get('best_day', ('N/A', 0))
+        worst_day, worst_day_pnl = insights.get('worst_day', ('N/A', 0))
+        
+        # ตรวจสอบว่ามีข้อมูลหรือไม่ก่อนแสดงผล
+        if best_day != 'N/A':
+            st.metric(label=f"Best Day ({best_day})", value=f"${best_day_pnl:,.2f}")
+        if worst_day != 'N/A':
+            st.metric(label=f"Worst Day ({worst_day})", value=f"${worst_day_pnl:,.2f}", delta_color="inverse")
+
+    # ส่วนที่ 2: Performance by Pair
+    with col2:
+        st.markdown("##### 💹 By Pair")
+        best_pair, best_pair_pnl = insights.get('best_pair', ('N/A', 0))
+        worst_pair, worst_pair_pnl = insights.get('worst_pair', ('N/A', 0))
+        
+        if best_pair != 'N/A':
+            st.metric(label=f"Best Pair ({best_pair})", value=f"${best_pair_pnl:,.2f}")
+        if worst_pair != 'N/A':
+            st.metric(label=f"Worst Pair ({worst_pair})", value=f"${worst_pair_pnl:,.2f}", delta_color="inverse")
+
+    # ส่วนที่ 3: Performance by Direction
+    with col3:
+        st.markdown("##### 📈 By Direction")
+        long_pnl, short_pnl = insights.get('long_vs_short_pnl', (0, 0))
+        st.metric(label="Long PnL", value=f"${long_pnl:,.2f}")
+        st.metric(label="Short PnL", value=f"${short_pnl:,.2f}")
