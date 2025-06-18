@@ -538,7 +538,8 @@ def find_user_strengths(
     # 5. คำนวณ Win Rate และ Profit Factor
     grouped['win_rate'] = (grouped['winning_trades'] / grouped['total_trades']) * 100
     grouped['profit_factor'] = grouped['gross_profit'] / grouped['gross_loss']
-    grouped['profit_factor'].replace([np.inf, -np.inf], grouped['gross_profit'], inplace=True)
+    is_infinite = np.isinf(grouped['profit_factor'])
+    grouped.loc[is_infinite, 'profit_factor'] = grouped.loc[is_infinite, 'gross_profit']
     grouped.fillna({'profit_factor': 0}, inplace=True)
     
     # 6. คัดเลือก "ท่าไม้ตาย"

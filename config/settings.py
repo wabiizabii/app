@@ -44,7 +44,7 @@ WORKSHEET_HEADERS = {
         "Maximal_consecutive_loss_Amount", "Maximal_consecutive_loss_Count",
         "Average_consecutive_wins", "Average_consecutive_losses"
     ], # 
-    WORKSHEET_PLANNED_LOGS: ["LogID", "PortfolioID", "PortfolioName", "Timestamp", "Symbol", "Mode", "Direction",
+    WORKSHEET_PLANNED_LOGS: ["LogID", "PortfolioID", "PortfolioName", "Timestamp", "Asset", "Mode", "Direction",
                                 "Risk %", "Fibo Level", "Entry", "SL", "TP", "Lot", "Risk $", "RR"], # 
     WORKSHEET_PORTFOLIOS: [
         'PortfolioID', 'PortfolioName', 'ProgramType', 'EvaluationStep',

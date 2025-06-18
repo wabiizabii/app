@@ -2,6 +2,7 @@
 import pandas as pd
 from datetime import datetime
 import numpy as np # numpy is used by pd.to_datetime and potentially in data handling
+import hashlib
 
 # ============== GENERAL UTILITY FUNCTIONS ==============
 # Functions taken from PART 1.6 of main (1).py
@@ -60,3 +61,21 @@ def get_performance(log_source_df, mode="week"):
     except Exception as e:
         print(f"Exception in get_performance: {e}")
         return 0.0, 0.0, 0
+    
+# ============== FILE HASHING UTILITY ==============
+# เพิ่มฟังก์ชันนี้เข้าไปที่ท้ายไฟล์
+
+def calculate_file_hash(file_bytes: bytes) -> str:
+    """
+    คำนวณค่าแฮช (SHA256) ของไฟล์จากข้อมูลที่เป็น bytes
+    เพื่อใช้เป็นตัวระบุเอกลักษณ์ของไฟล์
+
+    Args:
+        file_bytes: เนื้อหาของไฟล์ในรูปแบบ bytes
+
+    Returns:
+        สตริงที่แสดงค่าแฮช SHA256 ในรูปแบบเลขฐาน 16
+    """
+    sha256_hash = hashlib.sha256()
+    sha256_hash.update(file_bytes)
+    return sha256_hash.hexdigest()    
