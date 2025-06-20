@@ -7,66 +7,6 @@ import io
 import re
 from config import settings
 
-def _parse_report_history_format(lines: list):
-    """
-    ฟังก์ชันใหม่สำหรับประมวลผลไฟล์ ReportHistory จาก Exness โดยเฉพาะ
-    """
-    # สร้าง Dictionary สำหรับเก็บผลลัพธ์
-    extracted_data = {'deals': pd.DataFrame(), 'orders': pd.DataFrame(), 'positions': pd.DataFrame(), 'balance_summary': {}, 'results_summary': {}}
-
-    # 1. อ่านข้อมูลตารางหลัก (ข้าม 6 บรรทัดแรก)
-    # ใช้ io.StringIO เพื่อให้ pandas อ่าน list ของ string ได้เหมือนไฟล์
-    data_string = "\n".join(lines)
-    try:
-        # skiprows=6 คือหัวใจสำคัญของการแก้ไขนี้
-        df = pd.read_csv(io.StringIO(data_string), skiprows=6)
-        
-        # 2. แปลงชื่อคอลัมน์ให้อยู่ในรูปแบบมาตรฐานที่แอปพลิเคชันต้องการ
-        column_mapping = {
-            'Ticket': 'Deal_ID', 'Open Time': 'Time_Deal', 'Type': 'Type_Deal',
-            'Symbol': 'Symbol_Deal', 'Volume': 'Volume_Deal', 'Open Price': 'Price_Deal',
-            'S/L': 'S_L_Deal', 'T/P': 'T_P_Deal', 'Close Time': 'Close_Time_Deal',
-            'Close Price': 'Price_Close_Deal', 'Commission': 'Commission_Deal',
-            'Swap': 'Swap_Deal', 'Profit': 'Profit_Deal'
-        }
-        df.rename(columns=column_mapping, inplace=True)
-
-        # 3. สร้างคอลัมน์ที่จำเป็นแต่ไม่มีในไฟล์ต้นฉบับ
-        # ReportHistory จะมีแค่ buy/sell ไม่มี direction แยก
-        df['Direction_Deal'] = df['Type_Deal'].apply(lambda x: 'buy' if x == 'buy' else 'sell')
-        
-        # เพิ่มคอลัมน์ว่างอื่นๆ เพื่อให้โครงสร้างตรงกัน
-        for col in ['Order_ID_Deal', 'Fee_Deal', 'Balance_Deal', 'Comment_Deal']:
-            if col not in df.columns:
-                df[col] = np.nan
-
-        extracted_data['deals'] = df
-    except Exception as e:
-        st.warning(f"ไม่สามารถประมวลผลตารางข้อมูลในไฟล์ ReportHistory ได้: {e}")
-        # แม้จะ Error ก็ยังพยายามอ่านส่วน Summary ต่อไป
-
-    # 4. ดึงข้อมูลจากส่วนหัว (Balance, Equity)
-    summary_lines = lines[:6]
-    balance_summary = {}
-    try:
-        for line in summary_lines:
-            if "Balance:" in line:
-                # แยกข้อมูล Balance จากบรรทัดที่ 5
-                parts = line.split()
-                # Balance จะอยู่ตำแหน่งที่ 1 และ Equity อยู่ตำแหน่งที่ 3
-                balance_summary['balance'] = float(parts[1].replace(',', ''))
-                balance_summary['equity'] = float(parts[3].replace(',', ''))
-            elif "Profit:" in line:
-                 # แยกข้อมูล Floating P/L จากบรรทัดที่ 5
-                parts = line.split()
-                balance_summary['floating_p_l'] = float(parts[5].replace(',', ''))
-
-        extracted_data['balance_summary'] = balance_summary
-    except Exception as e:
-        st.warning(f"ไม่สามารถประมวลผลข้อมูลสรุปในไฟล์ ReportHistory ได้: {e}")
-
-    return extracted_data
-
 # [แก้ไข] เปลี่ยนชื่อฟังก์ชันและ Parameter ให้ถูกต้อง
 def extract_data_from_report_content(file_content_input: bytes):
     
@@ -91,12 +31,8 @@ def extract_data_from_report_content(file_content_input: bytes):
     
     if not lines: return extracted_data
     
-    if 'ReportHistory' in lines[0]:
-        # ถ้าใช่ ให้เรียกใช้ฟังก์ชันใหม่แล้วจบการทำงาน
-        return _parse_report_history_format(lines)
-    
     # ส่วน Logic ที่เหลือยังคงแข็งแกร่งและทำงานได้ดีเหมือนเดิม
-    section_raw_headers = {"Positions": "Time,Position,Symbol,Type,Volume,Price,S / L,T / P,Time,Price,Commission,Swap,Profit", "Orders": "Open Time,Order,Symbol,Type,Volume,Price,S / L,T / P,Time,State,,Comment", "Deals": "Time,Deal,Symbol,Type,Direction,Volume,Price,Order,Commission,Fee,Swap,Profit,Balance,Comment"}    
+    section_raw_headers = {"Positions": "Time,Position,Symbol,Type,Volume,Price,S / L,T / P,Time,Price,Commission,Swap,Profit", "Orders": "Open Time,Order,Symbol,Type,Volume,Price,S / L,T / P,Time,State,,Comment", "Deals": "Time,Deal,Symbol,Type,Direction,Volume,Price,Order,Commission,Fee,Swap,Profit,Balance,Comment"}
     expected_cleaned_columns = {"Positions": ["Time_Pos", "Position_ID", "Symbol_Pos", "Type_Pos", "Volume_Pos", "Price_Open_Pos", "S_L_Pos", "T_P_Pos", "Time_Close_Pos", "Price_Close_Pos", "Commission_Pos", "Swap_Pos", "Profit_Pos"], "Orders": ["Open_Time_Ord", "Order_ID_Ord", "Symbol_Ord", "Type_Ord", "Volume_Ord", "Price_Ord", "S_L_Ord", "T_P_Ord", "Close_Time_Ord", "State_Ord", "Filler_Ord","Comment_Ord"], "Deals": ["Time_Deal", "Deal_ID", "Symbol_Deal", "Type_Deal", "Direction_Deal", "Volume_Deal", "Price_Deal", "Order_ID_Deal", "Commission_Deal", "Fee_Deal", "Swap_Deal", "Profit_Deal", "Balance_Deal", "Comment_Deal"]}
     section_order_for_tables = ["Positions", "Orders", "Deals"]; section_header_indices = {}
     

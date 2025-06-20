@@ -1,9 +1,8 @@
 # ui/sidebar.py (ฉบับแก้ไขที่ถูกต้อง)
-
+from config import settings
 import streamlit as st
 import pandas as pd
 import numpy as np
-from config import settings
 from core import gs_handler, planning_logic, analytics_engine
 
 @st.cache_data
@@ -24,7 +23,7 @@ def render_sidebar():
 
         if df_portfolios is None or df_portfolios.empty:
             st.error("❌ ไม่พบข้อมูลพอร์ต")
-            st.session_state['active_portfolio_id_gs'] = None # Clear active id if no portfolios found
+            st.session_state[''] = None # Clear active id if no portfolios found
             return
 
         portfolio_options = dict(zip(df_portfolios['PortfolioName'], df_portfolios['PortfolioID']))
@@ -101,21 +100,53 @@ def render_sidebar():
         if st.session_state.mode == "FIBO":
             with st.container():
                 col1, col2, col3 = st.columns([2, 2, 2])
-                with col1: st.text_input("Symbol", "XAUUSD", key="fibo_asset")
-                with col2: st.number_input("Risk %", 0.01, 100.0, initial_risk_pct, 0.01, "%.2f", key="fibo_risk")
-                with col3: st.radio("Direction", ["Long", "Short"], index=0, horizontal=True, key="fibo_direction")
+                with col1:
+                    st.text_input(
+                        "Symbol", "XAUUSD",
+                        key="asset_fibo_val_v2" # <--- เปลี่ยน key ตรงนี้ให้ตรงกับ app.py
+                    )
+                with col2:
+                    st.number_input(
+                        "Risk %",
+                        0.01, 100.0, initial_risk_pct, 0.01, "%.2f",
+                        key="risk_pct_fibo_val_v2" # <--- เปลี่ยน key ตรงนี้ให้ตรงกับ app.py
+                    )
+                with col3:
+                    st.radio(
+                        "Direction", ["Long", "Short"], index=0, horizontal=True,
+                        key="direction_fibo_val_v2" # <--- เปลี่ยน key ตรงนี้ให้ตรงกับ app.py
+                    )
                 
                 col4, col5, col6 = st.columns(3)
-                with col4: st.text_input("Swing High", key="fibo_swing_high", placeholder="เช่น 2350.50")
-                with col5: st.text_input("Swing Low", key="fibo_swing_low", placeholder="เช่น 2330.00")
-                with col6: st.text_input("Spread", "0.0", key="fibo_spread")
-
+                with col4:
+                    st.text_input(
+                        "Swing High",
+                        value=st.session_state.swing_high_fibo_val_v2, # <--- เพิ่มบรรทัดนี้เข้ามา
+                        key="swing_high_fibo_val_v2",
+                        placeholder="เช่น 2350.50"
+                    )
+                with col5:
+                    st.text_input(
+                        "Swing Low",
+                        value=st.session_state.swing_low_fibo_val_v2,  # <--- เพิ่มบรรทัดนี้เข้ามา
+                        key="swing_low_fibo_val_v2",
+                        placeholder="เช่น 2330.00"
+    )
+                with col6:
+                    st.number_input(
+                        "Spread",
+                        value=float(st.session_state.fibo_spread), # บังคับให้เป็น float อีกครั้งเพื่อความชัวร์
+                        min_value=0.0,                             # **เพิ่มอันนี้ เพื่อกำหนดค่าต่ำสุดเป็น float ชัดเจน**
+                        step=0.01,                                 # **เพิ่มอันนี้ เพื่อให้มี step เป็น float ชัดเจน**
+                        format="%.2f",
+                        key="fibo_spread"
+                    )
                 st.markdown("**📐 Entry Fibo Levels**")
                 fibo_options = settings.FIBO_LEVELS_DEFINITIONS
-                if 'fibo_flags' not in st.session_state or len(st.session_state.fibo_flags) != len(fibo_options):
-                    st.session_state.fibo_flags = [True] * len(fibo_options)
+                if 'fibo_flags_v2' not in st.session_state or len(st.session_state.fibo_flags_v2) != len(fibo_options): # ใช้ fibo_flags_v2
+                    st.session_state.fibo_flags_v2 = [True] * len(fibo_options) # ใช้ fibo_flags_v2
                 cols_cb = st.columns(len(fibo_options))
-                st.session_state.fibo_flags = [c.checkbox(f"{lvl:.3f}", st.session_state.fibo_flags[i], key=f"fibo_cb_{i}") for i, (c, lvl) in enumerate(zip(cols_cb, fibo_options))]
+                st.session_state.fibo_flags_v2 = [c.checkbox(f"{lvl:.3f}", st.session_state.fibo_flags_v2[i], key=f"fibo_cb_{i}") for i, (c, lvl) in enumerate(zip(cols_cb, fibo_options))] # ใช้ fibo_flags_v2
 
                 asset_fibo = st.session_state.get("fibo_asset", "XAUUSD")
                 direction_fibo = st.session_state.get("fibo_direction", "Long")
@@ -187,33 +218,55 @@ def render_sidebar():
             elif raw_risk > max_risk_allowed: st.warning(f"Risk ถูกปรับเป็น {max_risk_allowed:.2f}% (จากขั้นสูง)")
             elif risk_to_use < raw_risk: st.warning(f"Risk ถูกจำกัดด้วย Daily DD Limit ที่ {drawdown_limit_pct_from_input:.1f}%")
         
+
+        st.write(f"DEBUG: active_id = {st.session_state.get('active_portfolio_id_gs')}")
+        st.write(f"DEBUG: swing_high_fibo_val_v2 = {st.session_state.get('swing_high_fibo_val_v2')}")
+        st.write(f"DEBUG: swing_low_fibo_val_v2 = {st.session_state.get('swing_low_fibo_val_v2')}")
+        st.write(f"DEBUG: risk_pct_fibo_val_v2 = {st.session_state.get('risk_pct_fibo_val_v2')}")
+        st.write(f"DEBUG: fibo_flags_v2 = {st.session_state.get('fibo_flags_v2')}")
+        st.write(f"DEBUG: direction_fibo_val_v2 = {st.session_state.get('direction_fibo_val_v2')}")
+        st.write(f"DEBUG: current_account_balance = {st.session_state.get('current_account_balance')}")
+        st.write(f"DEBUG: fibo_spread = {st.session_state.get('fibo_spread')}")
+
+
         planning_result = {}
-        if active_id: # Only calculate if a portfolio is active
+        if active_id:
             if st.session_state.mode == "FIBO":
-                if st.session_state.get("fibo_swing_high") and st.session_state.get("fibo_swing_low"):
+                # ตรวจสอบว่า Swing High และ Swing Low มีค่าหรือไม่ (ใช้ชื่อตัวแปรที่ถูกต้อง)
+                if st.session_state.get("swing_high_fibo_val_v2") and st.session_state.get("swing_low_fibo_val_v2"):
                     planning_result = planning_logic.calculate_fibo_trade_plan(
-                        swing_high=st.session_state.fibo_swing_high,
-                        swing_low=st.session_state.fibo_swing_low,
-                        risk_pct=risk_to_use,
-                        fibo_levels=settings.FIBO_LEVELS_DEFINITIONS,
-                        selected_fibo_flags=st.session_state.get("fibo_flags", []),
-                        direction=st.session_state.fibo_direction,
-                        balance=active_balance_to_use,
-                        spread=st.session_state.fibo_spread
+                        swing_high_str=str(st.session_state.swing_high_fibo_val_v2),
+                        swing_low_str=str(st.session_state.swing_low_fibo_val_v2),
+                        risk_pct_fibo_input=st.session_state.risk_pct_fibo_val_v2,
+                        fibo_levels_definitions=settings.FIBO_LEVELS_DEFINITIONS,
+                        fibo_flags_selected=st.session_state.fibo_flags_v2, # ใช้ fibo_flags_v2
+                        direction=st.session_state.direction_fibo_val_v2, # ใช้ direction_fibo_val_v2
+                        current_active_balance=st.session_state.current_account_balance,
+                        spread_str=str(st.session_state.fibo_spread)
                     )
+                else:
+            # แสดงข้อความเฉพาะเมื่อเงื่อนไขนี้ไม่ผ่าน
+                    st.info("กรุณากรอก Swing High และ Swing Low เพื่อคำนวณแผน") # <--- อาจจะเพิ่มบรรทัดนี้
+                   
+        
+            
             elif st.session_state.mode == "CUSTOM":
-                custom_entries = [{"entry": st.session_state.get(f"cust_e_{i}", ""), "sl": st.session_state.get(f"cust_sl_{i}", ""), "tp": st.session_state.get(f"cust_tp_{i}", "")} for i in range(st.session_state.get("custom_n_entries", 0))]
-                if any(e['entry'] and e['sl'] for e in custom_entries): # Check if there is at least one valid entry
+                custom_entries = [{"entry_str": st.session_state.get(f"cust_e_{i}", ""), "sl_str": st.session_state.get(f"cust_sl_{i}", ""), "tp_str": st.session_state.get(f"cust_tp_{i}", "")} for i in range(st.session_state.get("custom_n_entries", 0))]
+                if any(e['entry_str'] and e['sl_str'] for e in custom_entries): # Check if there is at least one valid entry
                     planning_result = planning_logic.calculate_custom_trade_plan(
-                        n_entries=st.session_state.custom_n_entries,
-                        risk_pct=risk_to_use,
-                        entries_details=custom_entries,
-                        balance=active_balance_to_use
+                        num_entries_custom=st.session_state.n_entry_custom_val_v2, # <--- เปลี่ยนชื่อ Argument ตรงนี้
+                        risk_pct_custom_input=risk_to_use,                         # <--- เปลี่ยนชื่อ Argument ตรงนี้ (ถ้ายังไม่เปลี่ยน)
+                        custom_entries_details=custom_entries,                     # <--- เปลี่ยนชื่อ Argument ตรงนี้ (ถ้ายังไม่เปลี่ยน)
+                        current_active_balance=active_balance_to_use               # <--- เปลี่ยนชื่อ Argument ตรงนี้ (ถ้ายังไม่เปลี่ยน)
                     )
         
         st.session_state.planning_result = planning_result
         st.session_state.entry_data_for_saving = planning_result.get('entry_data', [])
         
+        if st.session_state.planning_result and st.session_state.planning_result.get('error_message'):
+            st.error(st.session_state.planning_result['error_message'])
+
+
         st.markdown("---")
         st.subheader("💾 บันทึกแผน & ตรวจสอบ Drawdown")
         all_logs = gs_handler.load_all_planned_trade_logs_from_gsheets()

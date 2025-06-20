@@ -5,15 +5,16 @@ import pandas as pd
 import hashlib
 from datetime import datetime
 import uuid
+import traceback # เพิ่ม import นี้เผื่อไว้ใช้
 
 from config import settings
 from core import gs_handler, statement_processor
 
 def render_statement_section():
-    with st.expander("📂 Ultimate Chart Dashboard Import & Processing", expanded=True): # Expanded for debugging
+    with st.expander("📂 Ultimate Chart Dashboard Import & Processing", expanded=False):
         st.markdown("### 📊 จัดการ Statement และข้อมูลดิบ")
         st.markdown("---")
-        st.subheader("📤 อัปโหลด Statement Report (CSV)")
+        st.subheader("📤 ขั้นตอนที่ 1: อัปโหลด Statement Report (CSV)")
 
         if 'uploader_key' not in st.session_state:
             st.session_state.uploader_key = 0
@@ -24,7 +25,9 @@ def render_statement_section():
             key=f"statement_uploader_{st.session_state.uploader_key}"
         )
 
-        st.checkbox("⚙️ เปิดโหมด Debug", key="debug_statement_processing_v2", value=True) # Force True for this test
+        if uploaded_file and st.session_state.get('processed_filename') != uploaded_file.name:
+            st.session_state['extracted_data'] = None
+            st.session_state['processed_filename'] = uploaded_file.name
 
         if uploaded_file is not None:
             active_portfolio_id = st.session_state.get('active_portfolio_id_gs')
@@ -34,83 +37,140 @@ def render_statement_section():
                 st.toast("กรุณาเลือกพอร์ตก่อนอัปโหลด", icon="⚠️")
                 return
 
-            # --- Start Processing ---
-            st.info(f"เริ่มกระบวนการดีบักสำหรับไฟล์: {uploaded_file.name}")
-            
-            try:
-                file_content_bytes = uploaded_file.getvalue()
-                extracted_data = statement_processor.extract_data_from_report_content(file_content_bytes)
+            with st.spinner(f"กำลังตรวจสอบไฟล์ '{uploaded_file.name}'..."):
+                try:
+                    # --- Pre-computation ---
+                    file_content_bytes = uploaded_file.getvalue()
+                    current_file_hash = hashlib.md5(file_content_bytes).hexdigest()
+                    
+                    # --- Duplicate File Check ---
+                    gc = gs_handler.get_gspread_client()
+                    ws_dict, setup_error = gs_handler.setup_and_get_worksheets(gc)
+                    if setup_error:
+                        st.error(f"Setup GSheet Error: {setup_error}")
+                        return
+                    
+                    history_ws = ws_dict.get(settings.WORKSHEET_UPLOAD_HISTORY)
+                    if history_ws:
+                        is_duplicate, details = gs_handler.check_for_duplicate_file_hash(history_ws, current_file_hash)
+                        if is_duplicate:
+                            st.error(f"**ตรวจพบไฟล์ซ้ำ!**")
+                            st.warning(f"ไฟล์นี้เคยถูกอัปโหลดสำหรับพอร์ต **'{details['PortfolioName']}'** แล้วเมื่อวันที่ **{details['UploadTimestamp']}**")
+                            st.info("ระบบไม่อนุญาตให้อัปโหลดไฟล์เดียวกันซ้ำ เพื่อป้องกันข้อมูลที่ผิดพลาด หากต้องการดำเนินการต่อกรุณาใช้ไฟล์ Statement ฉบับใหม่")
+                            st.stop() # หยุดการทำงานทั้งหมด
+                    
+                    # --- Extraction ---
+                    st.session_state['extracted_data'] = statement_processor.extract_data_from_report_content(file_content_bytes)
+                    st.session_state['file_info_to_save'] = {"name": uploaded_file.name, "size": uploaded_file.size, "content_bytes": file_content_bytes, "hash": current_file_hash}
                 
+                except Exception as e:
+                    st.error(f"เกิดข้อผิดพลาดในการอ่านและตรวจสอบไฟล์: {e}")
+                    st.session_state['extracted_data'] = None
+
+            if st.session_state.get('extracted_data'):
                 st.markdown("---")
-                st.subheader("🕵️‍♂️ DEBUG STEP 1: ผลลัพธ์จากการแยกข้อมูล (Parser)")
-                st.write(f"Deals found: {len(extracted_data.get('deals', pd.DataFrame()))}")
-                st.write(f"Orders found: {len(extracted_data.get('orders', pd.DataFrame()))}")
-                st.write(f"Positions found: {len(extracted_data.get('positions', pd.DataFrame()))}")
-                st.write(f"Balance Summary found: {'Yes' if extracted_data.get('balance_summary') else 'No'}")
-                st.write(f"Results Summary found: {'Yes' if extracted_data.get('results_summary') else 'No'}")
-                st.markdown("---")
-
-                has_errors = False
+                st.subheader("📊 ขั้นตอนที่ 2: ผลการวิเคราะห์ไฟล์ (ยังไม่บันทึก)")
                 
-                gc = gs_handler.get_gspread_client()
-                ws_dict, setup_error = gs_handler.setup_and_get_worksheets(gc)
+                extracted_data = st.session_state['extracted_data']
+                deals_count = len(extracted_data.get('deals', pd.DataFrame()))
+                orders_count = len(extracted_data.get('orders', pd.DataFrame()))
+                positions_count = len(extracted_data.get('positions', pd.DataFrame()))
+                balance_summary = extracted_data.get('balance_summary', {})
+                results_summary = extracted_data.get('results_summary', {})
 
-                if setup_error:
-                    st.error(f"Setup GSheet Error: {setup_error}")
-                    return
-
-                st.subheader("🕵️‍♂️ DEBUG STEP 2: ผลลัพธ์จากการบันทึกข้อมูล (Save Handler)")
-
-                # --- DEALS ---
-                deals_data = extracted_data.get('deals', pd.DataFrame())
-                ok_d, new_d, skip_d = gs_handler.save_deals_to_actual_trades(ws_dict.get(settings.WORKSHEET_ACTUAL_TRADES), deals_data, active_portfolio_id, active_portfolio_name, uploaded_file.name, "debug_batch")
-                st.write(f"Deals Save -> OK: `{ok_d}` (Type: {type(ok_d)}), New: `{new_d}`, Skip: `{skip_d}`")
-                if not ok_d: has_errors = True
-                st.write(f"-> has_errors after Deals: `{has_errors}`")
-
-                # --- ORDERS ---
-                orders_data = extracted_data.get('orders', pd.DataFrame())
-                ok_o, new_o, skip_o = gs_handler.save_orders_to_gsheets(ws_dict.get(settings.WORKSHEET_ACTUAL_ORDERS), orders_data, active_portfolio_id, active_portfolio_name, uploaded_file.name, "debug_batch")
-                st.write(f"Orders Save -> OK: `{ok_o}` (Type: {type(ok_o)}), New: `{new_o}`, Skip: `{skip_o}`")
-                if not ok_o: has_errors = True
-                st.write(f"-> has_errors after Orders: `{has_errors}`")
-
-                # --- POSITIONS ---
-                positions_data = extracted_data.get('positions', pd.DataFrame())
-                ok_p, new_p, skip_p = gs_handler.save_positions_to_gsheets(ws_dict.get(settings.WORKSHEET_ACTUAL_POSITIONS), positions_data, active_portfolio_id, active_portfolio_name, uploaded_file.name, "debug_batch")
-                st.write(f"Positions Save -> OK: `{ok_p}` (Type: {type(ok_p)}), New: `{new_p}`, Skip: `{skip_p}`")
-                if not ok_p: has_errors = True
-                st.write(f"-> has_errors after Positions: `{has_errors}`")
+                st.success(f"✅ วิเคราะห์ไฟล์สำเร็จ! พบข้อมูลดังนี้:")
                 
-                # --- SUMMARY ---
-                bal_summary = extracted_data.get('balance_summary', {})
-                res_summary = extracted_data.get('results_summary', {})
-                ok_s, note_s = gs_handler.save_results_summary_to_gsheets(ws_dict.get(settings.WORKSHEET_STATEMENT_SUMMARIES), bal_summary, res_summary, active_portfolio_id, active_portfolio_name, uploaded_file.name, "debug_batch")
-                st.write(f"Summary Save -> OK: `{ok_s}` (Type: {type(ok_s)}), Note: `{note_s}`")
-                if not ok_s: has_errors = True
-                st.write(f"-> has_errors after Summary: `{has_errors}`")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Deals ที่พบ", f"{deals_count} รายการ")
+                col2.metric("Orders ที่พบ", f"{orders_count} รายการ")
+                col3.metric("Positions ที่พบ", f"{positions_count} รายการ")
                 
-                st.markdown("---")
-                st.subheader("🕵️‍♂️ DEBUG STEP 3: ผลลัพธ์สุดท้าย")
-                st.write(f"Final `has_errors` flag is: **`{has_errors}`**")
+                # --- แสดงข้อมูล Summary ---
+                st.markdown("#####  финансовые результаты (Financial Summary)")
+                sum_col1, sum_col2, sum_col3, sum_col4 = st.columns(4)
+                sum_col1.metric("Equity", f"${balance_summary.get('equity', 0.0):,.2f}")
+                sum_col2.metric("Balance", f"${balance_summary.get('balance', 0.0):,.2f}")
+                sum_col3.metric("Profit", f"${results_summary.get('profit', 0.0):,.2f}", delta=results_summary.get('profit', 0.0))
+                sum_col4.metric("Deposit", f"${results_summary.get('deposit_load', 0.0):,.2f}")
+                
+                st.info("กรุณาตรวจสอบข้อมูล หากถูกต้องให้กดยืนยันเพื่อบันทึก")
 
-                if not has_errors:
-                    st.toast("การประมวลผล (ดีบัก) สำเร็จ!", icon="✅")
-                    #gs_handler.load_actual_trades_from_gsheets.clear()
-                    #gs_handler.load_actual_orders_from_gsheets.clear()  # เคลียร์แคช Orders
-                    #gs_handler.load_actual_positions_from_gsheets.clear() # เคลียร์แคช Pos
-                    # Update balance in session state
-                    if 'equity' in bal_summary and bal_summary['equity'] is not None:
-                        st.session_state.latest_statement_equity = float(bal_summary['equity'])
-                        st.session_state.current_account_balance = float(bal_summary['equity'])
-                else:
-                    st.toast("การประมวลผล (ดีบัก) พบข้อผิดพลาดบางอย่าง", icon="🚨")
 
-            except Exception as e:
-                st.error("เกิด Exception ร้ายแรงระหว่างการดีบัก")
-                st.exception(e)
-            
-            finally:
-                # ทำให้สามารถอัปโหลดไฟล์เดิมซ้ำเพื่อดีบักได้
-                st.session_state.uploader_key += 1
-                st.warning("โหมดดีบักทำงานเสร็จสิ้น, กด R เพื่อเริ่มใหม่ หรืออัปโหลดไฟล์อีกครั้ง")
+        if st.session_state.get('extracted_data'):
+            st.markdown("---")
+            st.subheader("💾 ขั้นตอนที่ 3: ยืนยันการบันทึกข้อมูล")
+            if st.button("✅ ยืนยันการบันทึกข้อมูล (Confirm & Save)"):
+                try:
+                    # ดึงข้อมูลที่จำเป็นจาก session_state กลับมาใช้
+                    extracted_data = st.session_state['extracted_data']
+                    file_info = st.session_state['file_info_to_save']
+                    active_portfolio_id = st.session_state.get('active_portfolio_id_gs')
+                    active_portfolio_name = st.session_state.get('active_portfolio_name_gs')
+
+                    has_errors = False
+                    
+                    # --- Setup GSheets ---
+                    gc = gs_handler.get_gspread_client()
+                    ws_dict, setup_error = gs_handler.setup_and_get_worksheets(gc)
+
+                    if setup_error:
+                        st.error(f"Setup GSheet Error: {setup_error}")
+                        return
+
+                    # --- เริ่มกระบวนการบันทึกข้อมูล พร้อมแสดงสถานะ ---
+                    with st.spinner("กำลังบันทึกข้อมูล Deals..."):
+                        deals_data = extracted_data.get('deals', pd.DataFrame())
+                        ok_d, new_d, skip_d = gs_handler.save_deals_to_actual_trades(ws_dict.get(settings.WORKSHEET_ACTUAL_TRADES), deals_data, active_portfolio_id, active_portfolio_name, file_info['name'], "batch_id_placeholder")
+                        if not ok_d: has_errors = True
+                    st.write(f"Deals: บันทึกสำเร็จ! (ใหม่ {new_d}, ข้าม {skip_d})")
+
+                    with st.spinner("กำลังบันทึกข้อมูล Orders..."):
+                        orders_data = extracted_data.get('orders', pd.DataFrame())
+                        ok_o, new_o, skip_o = gs_handler.save_orders_to_actul_orders(ws_dict.get(settings.WORKSHEET_ACTUAL_ORDERS), orders_data, active_portfolio_id, active_portfolio_name, file_info['name'], "batch_id_placeholder")
+                        if not ok_o: has_errors = True
+                    st.write(f"Orders: บันทึกสำเร็จ! (ใหม่ {new_o}, ข้าม {skip_o})")
+
+                    with st.spinner("กำลังบันทึกข้อมูล Positions..."):
+                        positions_data = extracted_data.get('positions', pd.DataFrame())
+                        ok_p, new_p, skip_p = gs_handler.save_positions_to_actul_positions(ws_dict.get(settings.WORKSHEET_ACTUAL_POSITIONS), positions_data, active_portfolio_id, active_portfolio_name, file_info['name'], "batch_id_placeholder")
+                        if not ok_p: has_errors = True
+                    st.write(f"Positions: บันทึกสำเร็จ! (ใหม่ {new_p}, ข้าม {skip_p})")
+                    
+                    with st.spinner("กำลังบันทึกข้อมูล Summary..."):
+                        bal_summary = extracted_data.get('balance_summary', {})
+                        res_summary = extracted_data.get('results_summary', {})
+                        ok_s, note_s = gs_handler.save_results_summary_to_gsheets(ws_dict.get(settings.WORKSHEET_STATEMENT_SUMMARIES), bal_summary, res_summary, active_portfolio_id, active_portfolio_name, file_info['name'], "batch_id_placeholder")
+                        if not ok_s: has_errors = True
+                    st.write(f"Summary: บันทึกสำเร็จ! (สถานะ: {note_s})")
+                    
+                    # --- ส่วนของการบันทึกประวัติ (History Log) ---
+                    with st.spinner("กำลังบันทึกประวัติการอัปโหลด..."):
+                        upload_status = "Success" if not has_errors else "Failed"
+                        notes_message = f"Deals:New={new_d},Skip={skip_d},OK={ok_d} | Orders:New={new_o},Skip={skip_o},OK={ok_o} | Positions:New={new_p},Skip={skip_p},OK={ok_p} | Summary:Status={note_s},OK={ok_s}"
+                        import_batch_id = str(uuid.uuid4())
+                        history_log = {
+                            "UploadTimestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "PortfolioID": active_portfolio_id, "PortfolioName": active_portfolio_name,
+                            "FileName": file_info['name'], "FileSize": file_info['size'],
+                            "FileHash": hashlib.md5(file_info['content_bytes']).hexdigest(),
+                            "Status": upload_status, "ImportBatchID": import_batch_id, "Notes": notes_message
+                        }
+                        history_worksheet = ws_dict.get(settings.WORKSHEET_UPLOAD_HISTORY)
+                        if history_worksheet:
+                            save_ok, save_note = gs_handler.save_upload_history(history_worksheet, history_log)
+                        else:
+                            st.warning("ไม่ได้ตั้งค่า `WORKSHEET_UPLOAD_HISTORY` ใน settings")
+                    st.write("ประวัติการอัปโหลด: บันทึกสำเร็จ!")
+                    
+                    # --- สรุปผลสุดท้าย ---
+                    st.balloons()
+                    st.success("บันทึกข้อมูลทั้งหมดลงในฐานข้อมูลเรียบร้อยแล้ว!")
+                    
+                    # ล้างข้อมูลใน session state และ reset uploader
+                    st.session_state['extracted_data'] = None
+                    st.session_state.uploader_key += 1
+                    st.rerun() 
+
+                except Exception as e:
+                    st.error("เกิดข้อผิดพลาดร้ายแรงระหว่างการบันทึกข้อมูล")
+                    st.exception(e)

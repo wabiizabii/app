@@ -560,15 +560,7 @@ def find_user_strengths(
 
 
 
-# (วางโค้ดนี้ต่อท้ายในไฟล์ core/analytics_engine.py)
 
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
 
 def get_advanced_statistics(df_all_actual_trades: pd.DataFrame, active_portfolio_id: str) -> dict:
     if df_all_actual_trades.empty or not active_portfolio_id:

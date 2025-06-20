@@ -55,6 +55,7 @@ def initialize_session_state():
         'drawdown_limit_pct': settings.DEFAULT_DRAWDOWN_LIMIT_PCT, 'scaling_step': settings.DEFAULT_SCALING_STEP,
         'min_risk_pct': settings.DEFAULT_MIN_RISK_PERCENT, 'max_risk_pct': settings.DEFAULT_MAX_RISK_PERCENT,
         'scaling_mode_radio_val': 'Manual', 'save_fibo': False, 'save_custom': False, 'entry_data_for_saving': [],
+        'fibo_spread': 0.0,
     }
     for key, value in states.items():
         if key not in st.session_state:
