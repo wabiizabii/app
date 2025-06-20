@@ -219,15 +219,6 @@ def render_sidebar():
             elif risk_to_use < raw_risk: st.warning(f"Risk ถูกจำกัดด้วย Daily DD Limit ที่ {drawdown_limit_pct_from_input:.1f}%")
         
 
-        st.write(f"DEBUG: active_id = {st.session_state.get('active_portfolio_id_gs')}")
-        st.write(f"DEBUG: swing_high_fibo_val_v2 = {st.session_state.get('swing_high_fibo_val_v2')}")
-        st.write(f"DEBUG: swing_low_fibo_val_v2 = {st.session_state.get('swing_low_fibo_val_v2')}")
-        st.write(f"DEBUG: risk_pct_fibo_val_v2 = {st.session_state.get('risk_pct_fibo_val_v2')}")
-        st.write(f"DEBUG: fibo_flags_v2 = {st.session_state.get('fibo_flags_v2')}")
-        st.write(f"DEBUG: direction_fibo_val_v2 = {st.session_state.get('direction_fibo_val_v2')}")
-        st.write(f"DEBUG: current_account_balance = {st.session_state.get('current_account_balance')}")
-        st.write(f"DEBUG: fibo_spread = {st.session_state.get('fibo_spread')}")
-
 
         planning_result = {}
         if active_id:
