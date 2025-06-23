@@ -21,10 +21,14 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
 
     # --- ดึงข้อมูลสถิติทั้งหมด ---
     active_id = st.session_state.get('active_portfolio_id_gs')
+
+    # ดึง advanced_stats
     advanced_stats = analytics_engine.get_advanced_statistics(df_all_actual_trades=df_actual_trades, active_portfolio_id=active_id)
+
+    # ดึง full_stats ซึ่งรวม Performance Metrics
     full_stats = analytics_engine.get_full_dashboard_stats(
         df_all_actual_trades=df_actual_trades,
-        df_all_summaries=df_summaries,
+        df_all_summaries=df_summaries, # ต้องส่ง df_summaries ไปด้วย
         active_portfolio_id=active_id
     )
 
@@ -113,21 +117,28 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
                 def format_metric(label, value, currency=False, percent=False, ratio=False, color_cond=False):
                     if pd.isna(value) or value == '':
                         return f"<div style='display: flex; justify-content: space-between;'><span><b>{label}:</b></span> <span>N/A</span></div>"
-                    if not isinstance(value, (int, float)):
-                        return f"<div style='display: flex; justify-content: space-between;'><span><b>{label}:</b></span> <span>{value}</span></div>"
-                    
+
                     color = "white"
-                    if color_cond:
-                        color = "#28a745" if value >= 0 else "#dc3545"
+                    val_str = str(value) # Default to string representation
 
-                    if currency:
-                        val_str = f"${value:,.2f}"
-                        if not color_cond: color = "#28a745" if value > 0 else "#dc3545" if value < 0 else "white"
-                    elif percent: val_str = f"{value:.2f}%"
-                    elif ratio: val_str = f"{value:.2f}"
-                    else: val_str, color = str(int(value)), "white"
+                    if isinstance(value, (int, float)): # Apply formatting/color only if it's a number
+                        if color_cond:
+                            color = "#28a745" if value >= 0 else "#dc3545"
+
+                        if currency:
+                            val_str = f"${value:,.2f}"
+                            if not color_cond: # Apply profit/loss color if not already set by color_cond
+                                color = "#28a745" if value > 0 else "#dc3545" if value < 0 else "white"
+                        elif percent: 
+                            val_str = f"{value:.2f}%"
+                        elif ratio: 
+                            val_str = f"{value:.2f}"
+                        else: # For integer counts like Total Trades
+                            val_str = str(int(value))
+                            color = "white" 
+                    # If value is not int/float, val_str remains as str(value) and color remains white
+
                     return f"<div style='display: flex; justify-content: space-between;'><span><b>{label}:</b></span> <span style='color: {color};'>{val_str}</span></div>"
-
                 sub_col1, sub_col2 = st.columns(2)
                 with sub_col1:
                     st.markdown(format_metric("Total Trades", full_stats.get('total_trades')), unsafe_allow_html=True)
@@ -205,14 +216,77 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
     with st.container(border=True):
         # --- [แก้ไข] เปลี่ยน active_portfolio_id เป็น active_id ---
         insights = analytics_engine.get_ai_powered_insights(df_actual_trades, active_id)
-        
+
         # เพิ่ม import ของ render_ai_insights ที่ด้านบนของไฟล์ด้วย
         # from ui.ai_section import render_ai_insights
-        
+
         if not insights:
             st.info("มีข้อมูลไม่เพียงพอสำหรับสร้าง Insights")
         else:
             render_ai_insights(insights)
+
+st.markdown("---")
+st.subheader("📊 ผลตอบแทนและรายการเงินทุนพอร์ต")
+
+# ดึงค่าจาก session_state ที่ app.py คำนวณและเก็บไว้
+# ตรวจสอบว่าคีย์มีอยู่และค่าไม่ใช่ None
+realized_net_profit = st.session_state.get('realized_profit_loss')
+total_deposit = st.session_state.get('total_deposit_amount')
+total_withdrawal = st.session_state.get('total_withdrawal_amount')
+total_net_profit_from_sheet = st.session_state.get('total_net_profit_from_sheet')
+
+# ตรวจสอบค่าใดค่าหนึ่งที่มีความสำคัญ เพื่อกำหนดว่าจะแสดงข้อมูลหรือไม่
+if realized_net_profit is not None or total_deposit is not None or total_withdrawal is not None or total_net_profit_from_sheet is not None:
+    col_rp, col_dep, col_wit, col_net_from_sheet = st.columns(4)
+
+    with col_rp:
+        st.metric(
+            "กำไร/ขาดทุนรวมทั้งหมด",
+            f"{realized_net_profit:,.2f} USD" if realized_net_profit is not None else "N/A"
+        )
+    with col_dep:
+        st.metric(
+            "ยอดฝากรวม",
+            f"{total_deposit:,.2f} USD" if total_deposit is not None else "N/A"
+        )
+    with col_wit:
+        st.metric(
+            "ยอดถอนรวม",
+            f"{total_withdrawal:,.2f} USD" if total_withdrawal is not None else "N/A"
+        )
+    with col_net_from_sheet:
+        st.metric(
+            "กำไร/ขาดทุนจากการเทรด (จาก Sheet)",
+            f"{total_net_profit_from_sheet:,.2f} USD" if total_net_profit_from_sheet is not None else "N/A"
+        )
+else:
+    st.info("ไม่พบข้อมูลผลตอบแทนพอร์ต กรุณาเลือกพอร์ตที่ใช้งาน หรืออัปโหลดข้อมูลที่เกี่ยวข้อง")
+
+# --- กราฟ True Equity Curve ---
+df_equity_curve_data = st.session_state.get('df_equity_curve_data')
+if df_equity_curve_data is not None and not df_equity_curve_data.empty:
+    st.markdown("---")
+    st.markdown("#### กราฟ True Equity Curve")
+    # ตรวจสอบว่า df_equity_curve_data มีคอลัมน์ 'Timestamp' และ 'Equity For Chart'
+    if 'Timestamp' in df_equity_curve_data.columns and 'Equity For Chart' in df_equity_curve_data.columns:
+        # ตรวจสอบและแปลง 'Timestamp' ให้เป็น datetime
+        df_equity_curve_data['Timestamp'] = pd.to_datetime(df_equity_curve_data['Timestamp'], errors='coerce')
+        df_equity_curve_data.dropna(subset=['Timestamp'], inplace=True) # ลบแถวที่แปลง Timestamp ไม่สำเร็จ
+
+        # ตรวจสอบให้แน่ใจว่า 'Equity For Chart' เป็นตัวเลข
+        df_equity_curve_data['Equity For Chart'] = pd.to_numeric(df_equity_curve_data['Equity For Chart'], errors='coerce')
+        df_equity_curve_data.dropna(subset=['Equity For Chart'], inplace=True) # ลบแถวที่ Equity For Chart ไม่ใช่ตัวเลข
+
+        if not df_equity_curve_data.empty:
+            st.line_chart(df_equity_curve_data, x='Timestamp', y='Equity For Chart')
+        else:
+            st.info("ข้อมูลกราฟ True Equity Curve ว่างเปล่าหลังจากทำความสะอาดข้อมูล")
+    else:
+        st.warning("ข้อมูลกราฟ True Equity Curve ไม่สมบูรณ์ (ขาดคอลัมน์ Timestamp หรือ Equity For Chart)")
+else:
+    st.info("ไม่มีข้อมูลสำหรับสร้างกราฟ True Equity Curve")
+
+# =============================================================================            
 
 def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolios_gs=pd.DataFrame()):
     """
