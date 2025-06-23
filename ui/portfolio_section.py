@@ -150,6 +150,55 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
                     st.markdown(format_metric("Win Rate", full_stats.get('win_rate'), percent=True), unsafe_allow_html=True)
                     st.markdown(format_metric("Expectancy", full_stats.get('expectancy'), currency=True, color_cond=True), unsafe_allow_html=True)
 
+   # --- เพิ่มส่วนนี้: ผลตอบแทนและรายการเงินทุนพอร์ต ---
+    st.markdown("---")
+    st.subheader("📊 ผลตอบแทนและรายการเงินทุนพอร์ต")
+
+    # ดึงค่าจาก session_state ที่ app.py คำนวณและเก็บไว้
+    realized_net_profit = st.session_state.get('realized_profit_loss')
+    total_deposit = st.session_state.get('total_deposit_amount')
+    total_withdrawal = st.session_state.get('total_withdrawal_amount')
+    total_net_profit_from_sheet = st.session_state.get('total_net_profit_from_sheet')
+
+    if realized_net_profit is not None:
+        col_rp, col_dep, col_wit, col_net_from_sheet = st.columns(4) # เพิ่ม col_net_from_sheet
+
+        with col_rp:
+            st.metric(
+                "กำไร/ขาดทุนรวมทั้งหมด",
+                f"{realized_net_profit:,.2f} USD"
+            )
+        with col_dep:
+            st.metric(
+                "ยอดฝากรวม",
+                f"{total_deposit:,.2f} USD"
+            )
+        with col_wit:
+            st.metric(
+                "ยอดถอนรวม",
+                f"{total_withdrawal:,.2f} USD"
+            )
+        with col_net_from_sheet: # แสดง Net Profit จาก Sheet ด้วย
+            st.metric(
+                "กำไร/ขาดทุนจากการเทรด (จาก Sheet)",
+                f"{total_net_profit_from_sheet:,.2f} USD"
+            )
+    else:
+        st.info("ไม่พบข้อมูลผลตอบแทนพอร์ต กรุณาเลือกพอร์ตที่ใช้งาน")
+
+    # --- กราฟ True Equity Curve ---
+    df_equity_curve_data = st.session_state.get('df_equity_curve_data')
+    if df_equity_curve_data is not None and not df_equity_curve_data.empty:
+        st.markdown("---")
+        st.markdown("#### กราฟ True Equity Curve")
+        # ตรวจสอบว่า df_equity_curve_data มีคอลัมน์ 'Timestamp' และ 'Equity For Chart'
+        if 'Timestamp' in df_equity_curve_data.columns and 'Equity For Chart' in df_equity_curve_data.columns:
+            st.line_chart(df_equity_curve_data, x='Timestamp', y='Equity For Chart')
+        else:
+            st.warning("ข้อมูลกราฟ True Equity Curve ไม่สมบูรณ์ (ขาดคอลัมน์ Timestamp หรือ Equity For Chart)")
+    else:
+        st.info("ไม่มีข้อมูลสำหรับสร้างกราฟ True Equity Curve")
+
          # --- ส่วนที่ 3: AI-Powered Insights ---
     #st.divider()
     st.subheader("🤖 AI-Powered Insights")

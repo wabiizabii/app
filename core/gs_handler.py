@@ -10,7 +10,8 @@ from config import settings
 from config.settings import (
     WORKSHEET_STATEMENT_SUMMARIES, WORKSHEET_ACTUAL_ORDERS, 
     WORKSHEET_ACTUAL_POSITIONS, WORKSHEET_ACTUAL_TRADES,
-    WORKSHEET_PORTFOLIOS, WORKSHEET_PLANNED_LOGS, WORKSHEET_UPLOAD_HISTORY
+    WORKSHEET_PORTFOLIOS, WORKSHEET_PLANNED_LOGS, WORKSHEET_UPLOAD_HISTORY,
+    WORKSHEET_DASHBOARD
 )
 
 # ============== GOOGLE SHEETS UTILITY FUNCTIONS ==============
@@ -19,63 +20,44 @@ from config.settings import (
 def get_gspread_client():
     try:
         if "gcp_service_account" not in st.secrets:
-            st.warning("⚠️ โปรดตั้งค่า 'gcp_service_account' ใน `.streamlit/secrets.toml` เพื่อเชื่อมต่อ Google Sheets.")
+            st.error("⚠️ โปรดตั้งค่า 'gcp_service_account' ใน `.streamlit/secrets.toml`")
             return None
         return gspread.service_account_from_dict(st.secrets["gcp_service_account"])
     except Exception as e:
         st.error(f"❌ เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets: {e}")
-        st.info("ตรวจสอบว่า 'gcp_service_account' ใน secrets.toml ถูกต้อง และได้แชร์ Sheet กับ Service Account แล้ว")
         return None
+
 
 def setup_and_get_worksheets(gc_client):
     """
-    Opens the main spreadsheet and ensures all required worksheets exist and have correct headers.
-    Returns a dictionary of worksheet objects.
-    [แก้ไข] เพิ่มการ re-fetch worksheet object หลังจากการสร้างใหม่ เพื่อความเสถียร
+    [เวอร์ชันสมบูรณ์] เปิด Spreadsheet และตรวจสอบว่าชีตทั้งหมดที่กำหนดใน settings.WORKSHEET_HEADERS มีอยู่จริง
+    ถ้าไม่มี จะสร้างขึ้นมาใหม่พร้อมกับ Header ที่ถูกต้อง
     """
     if not gc_client:
         return None, "Google Sheets client not available."
-
+    
     ws_dict = {}
-    sh = None
     try:
         sh = gc_client.open(settings.GOOGLE_SHEET_NAME)
-        # Iterate through all defined worksheets in settings to ensure they exist and have correct headers
+        
+        # วนลูปเพื่อตรวจสอบทุกชีตที่กำหนดไว้ใน config
         for ws_name, headers in settings.WORKSHEET_HEADERS.items():
             try:
-                ws = sh.worksheet(ws_name)
-                # Check and update headers
-                current_ws_headers = []
-                if ws.row_count > 0:
-                    try:
-                        current_ws_headers = ws.row_values(1)
-                    except Exception:
-                        pass # Ignore if row_values fails, likely empty sheet
-                
-                # Update headers if they are missing, empty, or don't match exactly
-                if not current_ws_headers or all(h=="" for h in current_ws_headers) or set(current_ws_headers) != set(headers):
-                    ws.update([headers], value_input_option='USER_ENTERED')
-                    print(f"Info: Headers updated/written for worksheet '{ws_name}'.")
-                ws_dict[ws_name] = ws
+                worksheet = sh.worksheet(ws_name)
+                ws_dict[ws_name] = worksheet
             except gspread.exceptions.WorksheetNotFound:
-                print(f"Info: Worksheet '{ws_name}' not found. Creating it now...")
-                try:
-                   
-                    sh.add_worksheet(title=ws_name, rows="1000", cols=len(headers) + 5)
-                   
-                    new_ws = sh.worksheet(ws_name)
-                    
-                    new_ws.update([headers], value_input_option='USER_ENTERED')
-                    
-                    ws_dict[ws_name] = new_ws
-                    
-                except Exception as e_add_ws:
-                    return None, f"❌ Failed to create worksheet '{ws_name}': {e_add_ws}"
-            except Exception as e_open_ws:
-                return None, f"❌ Error accessing worksheet '{ws_name}': {e_open_ws}"
-        return ws_dict, None # Return dict and no error
-    except Exception as e_setup:
-        return None, f"❌ เกิดข้อผิดพลาดในการเข้าถึง Spreadsheet: {e_setup}"
+                st.warning(f"ไม่พบชีต '{ws_name}' กำลังสร้างขึ้นมาใหม่...")
+                new_worksheet = sh.add_worksheet(title=ws_name, rows="1", cols=len(headers))
+                new_worksheet.update([headers], value_input_option='USER_ENTERED')
+                ws_dict[ws_name] = new_worksheet
+                st.success(f"สร้างชีต '{ws_name}' สำเร็จ!")
+
+        return ws_dict, None
+        
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดร้ายแรงในการตั้งค่า Google Sheets: {e}")
+        traceback.print_exc()
+        return None, str(e)
 
 # --- LOAD FUNCTIONS ---
 @st.cache_data(ttl=300)
@@ -376,7 +358,9 @@ def save_results_summary_to_gsheets(ws, balance_summary_data, results_summary_da
             balance_key_map = {
                 "balance": "Balance", "equity": "Equity", "free_margin": "Free_Margin",
                 "margin": "Margin", "floating_p_l": "Floating_P_L", "margin_level": "Margin_Level",
-                "credit_facility": "Credit_Facility"
+                "credit_facility": "Credit_Facility",
+                "deposit": "Deposit",          
+                "withdrawal": "Withdrawal"
             }
             for k_extract, k_gsheet in balance_key_map.items():
                 if k_extract in balance_summary_data:
@@ -1058,79 +1042,60 @@ def get_advanced_statistics(df_all_actual_trades: pd.DataFrame, active_portfolio
 
 # (วางโค้ดนี้ต่อท้ายในไฟล์ core/analytics_engine.py)
 
+# (ในไฟล์ core/analytics_engine.py)
+
 def get_full_dashboard_stats(df_all_actual_trades: pd.DataFrame, df_all_summaries: pd.DataFrame, active_portfolio_id: str) -> dict:
     """
-    [Final & Complete Version] แก้ไขโค้ดส่วน Fallback ที่ขาดหายไป
+    [เวอร์ชันสุดท้าย] แก้ไขการใช้ชื่อตัวแปรให้ถูกต้องและสอดคล้องกันทั้งหมด
     """
-    # --- ตั้งค่าผลลัพธ์เริ่มต้น ---
-    stats = {
-        'total_trades': 'N/A', 'profit_trades': 'N/A', 'loss_trades': 'N/A',
-        'long_trades': 'N/A', 'short_trades': 'N/A',
-        'gross_profit': np.nan, 'gross_loss': np.nan, 'total_net_profit': np.nan,
-        'profit_factor': np.nan, 'win_rate': np.nan,
-        'best_profit': np.nan, 'biggest_loss': np.nan,
-        'avg_profit': np.nan, 'avg_loss': np.nan,
-        'expectancy': np.nan,
-        'avg_trade_size': np.nan, 'avg_trade_duration_str': 'N/A',
-        'today_pnl_actual': 0.0, 'active_trading_days_total': 0
-    }
+    stats = {}
 
-    # --- [ทางเลือกที่ 1] พยายามดึงข้อมูลจากชีท StatementSummaries ก่อน ---
-    if not df_all_summaries.empty and active_portfolio_id:
-        summary_row = df_all_summaries[df_all_summaries['PortfolioID'] == active_portfolio_id]
+    if df_all_actual_trades.empty or not active_portfolio_id:
+        return stats
+
+    # เริ่มต้นด้วยข้อมูลทั้งหมดของพอร์ตที่เลือก
+    df = df_all_actual_trades[df_all_actual_trades['PortfolioID'] == str(active_portfolio_id)].copy()
+    
+    # กรองข้อมูลในตัวแปร df ให้เหลือเฉพาะรายการเทรดจริงๆ
+    trade_types_to_exclude = ['balance', 'credit', 'deposit', 'withdrawal']
+    df = df[~df['Type_Deal'].str.lower().isin(trade_types_to_exclude)]
+    
+    # หลังจากนี้ ตัวแปร 'df' จะหมายถึง DataFrame ที่มีเฉพาะรายการเทรดเท่านั้น
+    if df.empty:
+        return stats
+    
+    # --- ทำการคำนวณทั้งหมดโดยใช้ตัวแปร 'df' ---
+    df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
+    
+    stats['total_trades'] = len(df)
+    stats['profit_trades'] = int((df['Profit_Deal'] > 0).sum())
+    stats['loss_trades'] = int((df['Profit_Deal'] < 0).sum())
+    stats['breakeven_trades'] = stats['total_trades'] - stats['profit_trades'] - stats['loss_trades']
+    
+    stats['gross_profit'] = df[df['Profit_Deal'] > 0]['Profit_Deal'].sum()
+    stats['gross_loss'] = df[df['Profit_Deal'] < 0]['Profit_Deal'].sum()
+    stats['total_net_profit'] = stats['gross_profit'] + stats['gross_loss']
+    
+    stats['win_rate'] = (stats['profit_trades'] / stats['total_trades']) * 100 if stats['total_trades'] > 0 else 0
+    stats['profit_factor'] = abs(stats['gross_profit'] / stats['gross_loss']) if stats['gross_loss'] != 0 else 0
+    
+    stats['best_profit'] = df['Profit_Deal'].max()
+    stats['biggest_loss'] = df['Profit_Deal'].min()
+
+    stats['avg_profit'] = stats['gross_profit'] / stats['profit_trades'] if stats['profit_trades'] > 0 else 0
+    stats['avg_loss'] = stats['gross_loss'] / stats['loss_trades'] if stats['loss_trades'] > 0 else 0
+    
+    win_rate_frac = stats.get('win_rate', 0) / 100
+    stats['expectancy'] = (win_rate_frac * stats.get('avg_profit', 0)) - ((1 - win_rate_frac) * abs(stats.get('avg_loss', 0)))
+
+    # --- [ ส่วนที่แก้ไขชื่อตัวแปรที่ผิดพลาด ] ---
+    if 'Volume_Deal' in df.columns:
+        df['Volume_Deal'] = pd.to_numeric(df['Volume_Deal'], errors='coerce').fillna(0)
+        stats['avg_trade_size'] = df['Volume_Deal'].mean()
+    else:
+        stats['avg_trade_size'] = 0.0
         
-        if not summary_row.empty:
-            summary_data = summary_row.iloc[0]
-            
-            def to_numeric(series_val):
-                if pd.isna(series_val) or series_val == '': return np.nan
-                if isinstance(series_val, (int, float)): return series_val
-                cleaned_val = str(series_val).replace('$', '').replace('%', '').replace(',', '').strip()
-                return pd.to_numeric(cleaned_val, errors='coerce')
-
-            # ดึงค่าจากชีทสรุป
-            stats['total_trades'] = to_numeric(summary_data.get('Total Trades'))
-            stats['profit_trades'] = to_numeric(summary_data.get('Profit Trades'))
-            stats['loss_trades'] = to_numeric(summary_data.get('Loss Trades'))
-            stats['long_trades'] = to_numeric(summary_data.get('Total_Long_Trades'))
-            stats['short_trades'] = to_numeric(summary_data.get('Total_Short_Trades'))
-            stats['gross_profit'] = to_numeric(summary_data.get('Gross Profit'))
-            stats['gross_loss'] = to_numeric(summary_data.get('Gross Loss'))
-            stats['total_net_profit'] = to_numeric(summary_data.get('Total Net Profit'))
-            stats['profit_factor'] = to_numeric(summary_data.get('Profit Factor'))
-            stats['win_rate'] = to_numeric(summary_data.get('Win Rate'))
-            stats['best_profit'] = to_numeric(summary_data.get('Best Profit'))
-            stats['biggest_loss'] = to_numeric(summary_data.get('Biggest Loss'))
-            stats['avg_profit'] = to_numeric(summary_data.get('Avg. Profit'))
-            stats['avg_loss'] = to_numeric(summary_data.get('Avg. Loss'))
-            stats['expectancy'] = to_numeric(summary_data.get('Expected Payoff'))
-            stats['avg_trade_duration_str'] = summary_data.get('Avg. Trade Duration', 'N/A')
-
-            # ตรรกะสำหรับ Avg. Trade Size
-            avg_trade_size_summary = to_numeric(summary_data.get('Avg. Trade Size'))
-            if pd.notna(avg_trade_size_summary):
-                stats['avg_trade_size'] = avg_trade_size_summary
-            elif not df_all_actual_trades.empty:
-                df = df_all_actual_trades[df_all_actual_trades['PortfolioID'] == active_portfolio_id].copy()
-                if not df.empty and 'DealVolume' in df.columns:
-                    trade_types_to_exclude = ['balance', 'credit', 'deposit', 'withdrawal']
-                    df = df[~df['Type_Deal'].str.lower().isin(trade_types_to_exclude)]
-                    total_volume = pd.to_numeric(df['DealVolume'], errors='coerce').sum()
-                    total_trades_val = stats.get('total_trades')
-                    if pd.notna(total_trades_val) and total_trades_val > 0:
-                        stats['avg_trade_size'] = total_volume / total_trades_val
-
-            # คำนวณค่าที่ต้องทำสดๆ
-            if not df_all_actual_trades.empty:
-                df = df_all_actual_trades[df_all_actual_trades['PortfolioID'] == active_portfolio_id].copy()
-                if not df.empty:
-                    df['Time_Deal'] = pd.to_datetime(df['Time_Deal'])
-                    df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
-                    today_str = datetime.now().strftime('%Y-%m-%d')
-                    stats['today_pnl_actual'] = df[df['Time_Deal'].dt.strftime('%Y-%m-%d') == today_str]['Profit_Deal'].sum()
-                    stats['active_trading_days_total'] = df['Time_Deal'].dt.normalize().nunique()
-            
-            return stats
+    return stats
 
     # --- [ทางเลือกที่ 2] แผนสำรอง: ถ้าไม่มีข้อมูลสรุป ให้คำนวณทุกอย่างจาก Trade Log ---
     # vvvv [ส่วนที่แก้ไขให้สมบูรณ์] vvvv
@@ -1232,3 +1197,60 @@ def save_upload_history(ws, history_data):
         print(f"!!! ERROR saving history: {e}")
         traceback.print_exc()
         return False, str(e)
+@st.cache_data(ttl=60)
+def load_dashboard_data():
+    """
+    โหลดข้อมูลทั้งหมดจากชีต PortfolioDashboard สำหรับการแสดงผล
+    """
+    gc = get_gspread_client()
+    if gc is None: return pd.DataFrame()
+    try:
+        sh = gc.open(settings.GOOGLE_SHEET_NAME)
+        worksheet = sh.worksheet(settings.WORKSHEET_DASHBOARD)
+        return pd.DataFrame(worksheet.get_all_records())
+    except Exception:
+        return pd.DataFrame()
+
+# --- SAVE/UPDATE FUNCTIONS ---
+
+
+
+# (ในไฟล์ core/gs_handler.py)
+
+def update_dashboard_sheet(portfolio_id: str, new_stats: dict):
+    """
+    [Final Version] This version handles both old and new gspread versions
+    by checking if the result of find() is None instead of relying on exceptions.
+    """
+    gc = get_gspread_client()
+    if not gc: 
+        print("ERROR: Google client not available for dashboard update.")
+        return False
+    try:
+        sh = gc.open(settings.GOOGLE_SHEET_NAME)
+        ws = sh.worksheet(settings.WORKSHEET_DASHBOARD)
+        headers = settings.WORKSHEET_HEADERS[settings.WORKSHEET_DASHBOARD]
+        
+        # --- [ ส่วนที่แก้ไข ] ---
+        # ค้นหา cell ของ portfolio id
+        cell = ws.find(portfolio_id, in_column=1)
+        
+        row_values = [str(new_stats.get(h, "")).strip() for h in headers]
+        
+        # ตรวจสอบว่า cell เป็น None หรือไม่ (สำหรับ gspread เวอร์ชันเก่า)
+        if cell:
+            # ถ้าเจอ (cell is not None) ให้อัปเดตแถวนั้น
+            ws.update(f'A{cell.row}', [row_values], value_input_option='USER_ENTERED')
+        else:
+            # ถ้าไม่เจอ (cell is None) ให้เพิ่มแถวใหม่
+            ws.append_row(row_values, value_input_option='USER_ENTERED')
+        # --- [ สิ้นสุดส่วนที่แก้ไข ] ---
+            
+        load_dashboard_data.clear()
+        return True
+        
+    except Exception as e:
+        # ดักจับ Error อื่นๆ ที่อาจเกิดขึ้น
+        st.error(f"❌ เกิดข้อผิดพลาดร้ายแรงในการอัปเดต Dashboard Sheet: {e}")
+        traceback.print_exc()
+        return False
