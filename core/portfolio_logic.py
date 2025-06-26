@@ -58,7 +58,8 @@ def prepare_new_portfolio_data_for_gsheet(
         'Status': form_new_status_in_form,
         'InitialBalance': form_new_initial_balance_in_form,
         'CreationDate': creation_date_str,
-        'Notes': form_notes_val
+        'Notes': form_notes_val,
+        'AccountID': '' # <--- เพิ่มตรงนี้ เพื่อให้ AccountID ว่างเปล่าเมื่อสร้างพอร์ตใหม่
     }
 
     if selected_program_type_to_use_in_form in ["Prop Firm Challenge", "Funded Account"]:

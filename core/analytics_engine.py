@@ -1,5 +1,5 @@
-# core/analytics_engine.py
-
+# core/analytics_engine.py (รวมฟังก์ชัน Analytics ทั้งหมด)
+import streamlit as st #
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -215,7 +215,6 @@ def analyze_actual_trades_for_ai(
     
     return results
 
-# วางโค้ดนี้ต่อท้ายไฟล์ core/analytics_engine.py
 
 def get_dashboard_analytics_for_actual(df_all_actual_trades, df_all_statement_summaries, active_portfolio_id):
     
@@ -622,86 +621,170 @@ def get_advanced_statistics(df_all_actual_trades: pd.DataFrame, active_portfolio
     
     return results
 
-# (วางโค้ดนี้ต่อท้ายในไฟล์ core/analytics_engine.py)
-
 def get_full_dashboard_stats(df_all_actual_trades: pd.DataFrame, df_all_summaries: pd.DataFrame, active_portfolio_id: str) -> dict:
     """
-    [Final v4] แก้ไขชื่อคอลัมน์ 'DealVolume' -> 'Volume_Deal' ให้ถูกต้อง
+    Calculates comprehensive dashboard statistics for a given portfolio.
+    Prioritizes calculated values from actual trades,
+    then overrides with latest summary values from StatementSummaries if available.
     """
     stats = {}
 
-    # --- ส่วนที่ 1: คำนวณค่าพื้นฐานจาก ActualTrades (ส่วนที่ทำงานดีอยู่แล้ว) ---
+    # --- Part 1: Calculate core metrics from ActualTrades ---
     if not df_all_actual_trades.empty and active_portfolio_id:
         df = df_all_actual_trades[df_all_actual_trades['PortfolioID'] == active_portfolio_id].copy()
+        
+        # Filter to actual trading deals only (exclude balance, credit, deposit, withdrawal)
         trade_types_to_exclude = ['balance', 'credit', 'deposit', 'withdrawal']
         df = df[~df['Type_Deal'].str.lower().isin(trade_types_to_exclude)]
         
         if not df.empty:
-            df['Time_Deal'] = pd.to_datetime(df['Time_Deal'])
+            df['Time_Deal'] = pd.to_datetime(df['Time_Deal'], errors='coerce')
             df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
             
+            # Determine trade direction
             if 'DealDirection' in df.columns and not df['DealDirection'].isnull().all():
                 df['Direction'] = df['DealDirection'].str.strip().str.upper()
             else:
                 df['Direction'] = np.where(df['Type_Deal'].str.lower() == 'buy', 'LONG', 'SHORT')
 
-            # --- [แก้ไข] เปลี่ยน 'DealVolume' เป็น 'Volume_Deal' ---
+            # Populate basic stats from actual trades
+            stats['Total_Trades'] = len(df)
+            stats['Profit_Trades_Count'] = int((df['Profit_Deal'] > 0).sum())
+            stats['Loss_Trades_Count'] = int((df['Profit_Deal'] < 0).sum())
+            stats['Breakeven_Trades_Count'] = int((df['Profit_Deal'] == 0).sum()) # Assuming 0 profit is breakeven
+            
+            stats['Long_Trades_Count'] = int((df['Direction'] == 'LONG').sum())
+            stats['Short_Trades_Count'] = int((df['Direction'] == 'SHORT').sum())
+
+            stats['Gross_Profit'] = df[df['Profit_Deal'] > 0]['Profit_Deal'].sum()
+            stats['Gross_Loss'] = df[df['Profit_Deal'] < 0]['Profit_Deal'].sum()
+            stats['Total_Net_Profit'] = stats['Gross_Profit'] + stats['Gross_Loss'] # Gross_Loss is negative
+
+            stats['Win_Rate'] = (stats['Profit_Trades_Count'] / stats['Total_Trades']) * 100 if stats['Total_Trades'] > 0 else 0
+            stats['Profit_Factor'] = abs(stats['Gross_Profit'] / stats['Gross_Loss']) if stats['Gross_Loss'] != 0 else 0 # Corrected profit factor calculation
+            
+            stats['Largest_Profit_Trade'] = df['Profit_Deal'].max()
+            stats['Largest_Loss_Trade'] = df['Profit_Deal'].min()
+
+            stats['Average_Profit_Trade'] = stats['Gross_Profit'] / stats['Profit_Trades_Count'] if stats['Profit_Trades_Count'] > 0 else 0
+            stats['Average_Loss_Trade'] = stats['Gross_Loss'] / stats['Loss_Trades_Count'] if stats['Loss_Trades_Count'] > 0 else 0
+            
+            win_rate_frac = stats['Win_Rate'] / 100
+            stats['Expected_Payoff'] = (win_rate_frac * stats['Average_Profit_Trade']) - ((1 - win_rate_frac) * abs(stats['Average_Loss_Trade'])) if stats['Total_Trades'] > 0 else 0.0
+
             if 'Volume_Deal' in df.columns:
-                stats['avg_trade_size'] = pd.to_numeric(df['Volume_Deal'], errors='coerce').mean()
+                stats['Average_Trade_Size'] = pd.to_numeric(df['Volume_Deal'], errors='coerce').mean()
             else:
-                stats['avg_trade_size'] = 0.0
-            # ---------------------------------------------------
-
-            stats['total_trades'] = len(df)
-            stats['profit_trades'] = int((df['Profit_Deal'] > 0).sum())
-            stats['loss_trades'] = int((df['Profit_Deal'] < 0).sum())
-            stats['breakeven_trades'] = int((df['Profit_Deal'] == 0).sum())
-            stats['long_trades'] = int((df['Direction'] == 'LONG').sum())
-            stats['short_trades'] = int((df['Direction'] == 'SHORT').sum())
-            stats['gross_profit'] = df[df['Profit_Deal'] > 0]['Profit_Deal'].sum()
-            stats['gross_loss'] = df[df['Profit_Deal'] < 0]['Profit_Deal'].sum()
-            stats['total_net_profit'] = stats['gross_profit'] + stats['gross_loss']
-            stats['win_rate'] = (stats['profit_trades'] / stats['total_trades']) * 100 if stats['total_trades'] > 0 else 0
-            stats['profit_factor'] = stats['gross_profit'] / abs(stats['gross_loss']) if stats['gross_loss'] != 0 else 0
-            stats['best_profit'] = df['Profit_Deal'].max()
-            stats['biggest_loss'] = df['Profit_Deal'].min()
-            stats['avg_profit'] = stats['gross_profit'] / stats['profit_trades'] if stats['profit_trades'] > 0 else 0
-            stats['avg_loss'] = stats['gross_loss'] / stats['loss_trades'] if stats['loss_trades'] > 0 else 0
-            win_rate_frac = stats.get('win_rate', 0) / 100
-            stats['expectancy'] = (win_rate_frac * stats.get('avg_profit', 0)) - ((1 - win_rate_frac) * abs(stats.get('avg_loss', 0)))
+                stats['Average_Trade_Size'] = 0.0
             
+            # --- Max Consecutive Wins/Losses (Simplified from get_advanced_statistics if needed) ---
+            df_rev = df.iloc[::-1].copy() # Reverse for streaks
+            df_rev['outcome'] = np.sign(df_rev['Profit_Deal']) # 1 for win, -1 for loss, 0 for BE
+            
+            # Group consecutive outcomes and count them
+            streaks = df_rev['outcome'].groupby((df_rev['outcome'] != df_rev['outcome'].shift()).cumsum()).cumcount() + 1
+            
+            stats['Max_Consecutive_Wins_Count'] = streaks[df_rev['outcome'] == 1].max() if (df_rev['outcome'] == 1).any() else 0
+            stats['Max_Consecutive_Losses_Count'] = streaks[df_rev['outcome'] == -1].max() if (df_rev['outcome'] == -1).any() else 0
+
+            # Calculate profit/loss for those max streaks (requires more complex logic, leave as 0 for now)
+            stats['Max_Consecutive_Wins_Profit'] = 0.0 # To be calculated if needed
+            stats['Max_Consecutive_Losses_Profit'] = 0.0 # To be calculated if needed
+
+            # Other stats that are typically in StatementSummaries but can be calculated:
+            stats['Active_Trading_Days_Total'] = df['Time_Deal'].dt.normalize().nunique()
+            
+            # Placeholder for today's PnL (actual trades for the current day)
             today_str = datetime.now().strftime('%Y-%m-%d')
-            stats['today_pnl_actual'] = df[df['Time_Deal'].dt.strftime('%Y-%m-%d') == today_str]['Profit_Deal'].sum()
-            stats['active_trading_days_total'] = df['Time_Deal'].dt.normalize().nunique()
-            stats['avg_profit'] = stats['gross_profit'] / stats['profit_trades'] if stats['profit_trades'] > 0 else 0
-            stats['avg_loss'] = stats['gross_loss'] / stats['loss_trades'] if stats['loss_trades'] > 0 else 0
-            
-    # --- ส่วนที่ 2: เขียนทับด้วยข้อมูลจาก StatementSummaries ---
+            stats['Today_PnL_Actual'] = df[df['Time_Deal'].dt.strftime('%Y-%m-%d') == today_str]['Profit_Deal'].sum()
+
+
+    # --- Part 2: Override/Supplement with data from the LATEST StatementSummaries entry ---
+    # This ensures consistency with the report's own calculated values where appropriate.
     if not df_all_summaries.empty and active_portfolio_id:
-        summary_row = df_all_summaries[df_all_summaries['PortfolioID'] == active_portfolio_id]
-        if not summary_row.empty:
-            summary_data = summary_row.iloc[0]
+        df_summary_filtered = df_all_summaries[df_all_summaries['PortfolioID'] == active_portfolio_id].copy()
+        
+        if not df_summary_filtered.empty and 'DateTime' in df_summary_filtered.columns:
+            # Get the latest summary row for this portfolio
+            latest_summary_row = df_summary_filtered.sort_values(by='DateTime', ascending=False).iloc[0]
 
-            def to_numeric_safe(series_val):
-                if pd.isna(series_val) or str(series_val).strip() == '': return np.nan
-                if isinstance(series_val, (int, float)): return series_val
-                cleaned_val = str(series_val).replace('$', '').replace('%', '').replace(',', '').strip()
-                return pd.to_numeric(cleaned_val, errors='coerce')
+            # Helper to safely get numeric value from summary row
+            def get_summary_numeric(col_name, default_value=0.0):
+                if col_name in latest_summary_row and pd.notna(latest_summary_row[col_name]):
+                    # Attempt to clean and convert, as these might come as strings from GSheets
+                    val = str(latest_summary_row[col_name]).replace('$', '').replace('%', '').replace(',', '').strip()
+                    try: return float(val) if '.' in val or 'e' in val.lower() else int(val)
+                    except ValueError: return default_value
+                return default_value
 
-            override_map = {
-                'Total_Long_Trades': 'long_trades',
-                'Total_Short_Trades': 'short_trades',
-                'Avg. Trade Size': 'avg_trade_size', # จะถูกเขียนทับถ้ามีใน summary
-                'Expected Payoff': 'expectancy'
-            }
+            # Update stats with latest values from StatementSummaries, overriding calculated if preferred
+            # This mapping should align with the headers in settings.WORKSHEET_STATEMENT_SUMMARIES
+            stats['Balance'] = get_summary_numeric('Balance')
+            stats['Equity'] = get_summary_numeric('Equity')
+            stats['Free_Margin'] = get_summary_numeric('Free_Margin')
+            stats['Margin'] = get_summary_numeric('Margin')
+            stats['Floating_P_L'] = get_summary_numeric('Floating_P_L')
+            stats['Margin_Level'] = get_summary_numeric('Margin_Level')
+            stats['Credit_Facility'] = get_summary_numeric('Credit_Facility')
+            stats['Deposit'] = get_summary_numeric('Deposit') # Total Deposit from Summary
+            stats['Withdrawal'] = get_summary_numeric('Withdrawal') # Total Withdrawal from Summary
+            
+            # Gross/Net Profit (Total_Net_Profit is calculated from deals, Gross_Profit from summary text)
+            if 'Gross_Profit' in latest_summary_row.index:
+                stats['Gross_Profit'] = get_summary_numeric('Gross_Profit')
+            if 'Gross_Loss' in latest_summary_row.index:
+                stats['Gross_Loss'] = get_summary_numeric('Gross_Loss')
+            
+            # Performance Metrics
+            if 'Profit_Factor' in latest_summary_row.index:
+                stats['Profit_Factor'] = get_summary_numeric('Profit_Factor')
+            if 'Recovery_Factor' in latest_summary_row.index:
+                stats['Recovery_Factor'] = get_summary_numeric('Recovery_Factor')
+            if 'Expected_Payoff' in latest_summary_row.index:
+                stats['Expected_Payoff'] = get_summary_numeric('Expected_Payoff')
+            if 'Sharpe_Ratio' in latest_summary_row.index:
+                stats['Sharpe_Ratio'] = get_summary_numeric('Sharpe_Ratio')
 
-            for sheet_col, stats_key in override_map.items():
-                if sheet_col in summary_data:
-                    summary_value = to_numeric_safe(summary_data[sheet_col])
-                    if pd.notna(summary_value):
-                        stats[stats_key] = summary_value
+            # Drawdown Metrics
+            stats['Balance_Drawdown'] = get_summary_numeric('Balance_Drawdown') # If this field is ever populated
+            stats['Balance_Drawdown_Absolute'] = get_summary_numeric('Balance_Drawdown_Absolute')
+            stats['Maximal_Drawdown_Value'] = get_summary_numeric('Maximal_Drawdown_Value')
+            stats['Maximal_Drawdown_Percent'] = get_summary_numeric('Maximal_Drawdown_Percent')
+            stats['Balance_Drawdown_Relative_Percent'] = get_summary_numeric('Balance_Drawdown_Relative_Percent')
+            stats['Balance_Drawdown_Relative_Value'] = get_summary_numeric('Balance_Drawdown_Relative_Value')
+
+            # Trade Counts/Percentages (from Summary)
+            stats['Total_Trades'] = int(get_summary_numeric('Total_Trades', default_value=0))
+            stats['Profit_Trades_Count'] = int(get_summary_numeric('Profit_Trades_Count', default_value=0))
+            stats['Profit_Trades_Percent'] = get_summary_numeric('Profit_Trades_Percent')
+            stats['Loss_Trades_Count'] = int(get_summary_numeric('Loss_Trades_Count', default_value=0))
+            stats['Loss_Trades_Percent'] = get_summary_numeric('Loss_Trades_Percent')
+            stats['Long_Trades_Count'] = int(get_summary_numeric('Long_Trades_Count', default_value=0))
+            stats['Long_Trades_Won_Percent'] = get_summary_numeric('Long_Trades_Won_Percent')
+            stats['Short_Trades_Count'] = int(get_summary_numeric('Short_Trades_Count', default_value=0))
+            stats['Short_Trades_Won_Percent'] = get_summary_numeric('Short_Trades_Won_Percent')
+
+            # Largest/Average Trades
+            stats['Largest_Profit_Trade'] = get_summary_numeric('Largest_Profit_Trade')
+            stats['Average_Profit_Trade'] = get_summary_numeric('Average_Profit_Trade')
+            stats['Largest_Loss_Trade'] = get_summary_numeric('Largest_Loss_Trade')
+            stats['Average_Loss_Trade'] = get_summary_numeric('Average_Loss_Trade')
+
+            # Consecutive Trades
+            stats['Max_Consecutive_Wins_Count'] = int(get_summary_numeric('Max_Consecutive_Wins_Count', default_value=0))
+            stats['Max_Consecutive_Wins_Profit'] = get_summary_numeric('Max_Consecutive_Wins_Profit')
+            stats['Maximal_Consecutive_Profit_Value'] = get_summary_numeric('Maximal_Consecutive_Profit_Value')
+            stats['Maximal_Consecutive_Profit_Count'] = int(get_summary_numeric('Maximal_Consecutive_Profit_Count', default_value=0))
+            stats['Max_Consecutive_Losses_Count'] = int(get_summary_numeric('Max_Consecutive_Losses_Count', default_value=0))
+            stats['Max_Consecutive_Losses_Profit'] = get_summary_numeric('Max_Consecutive_Losses_Profit')
+            stats['Maximal_Consecutive_Loss_Value'] = get_summary_numeric('Maximal_Consecutive_Loss_Value')
+            stats['Maximal_Consecutive_Loss_Count'] = int(get_summary_numeric('Maximal_Consecutive_Loss_Count', default_value=0))
+            stats['Average_Consecutive_Wins'] = int(get_summary_numeric('Average_Consecutive_Wins', default_value=0))
+            stats['Average_Consecutive_Losses'] = int(get_summary_numeric('Average_Consecutive_Losses', default_value=0))
 
     return stats
+
+
 def get_ai_powered_insights(df_all_actual_trades: pd.DataFrame, active_portfolio_id: str) -> dict:
     """
     วิเคราะห์ข้อมูลการเทรดเพื่อหาข้อมูลเชิงลึกที่น่าสนใจ
@@ -756,3 +839,51 @@ def get_ai_powered_insights(df_all_actual_trades: pd.DataFrame, active_portfolio
     )
     
     return insights
+
+# core/analytics_engine.py
+
+def calculate_true_equity_curve(df_summaries: pd.DataFrame, portfolio_id: str):
+    """
+    คำนวณ True Equity Curve, Realized Net Profit, Total Deposit, Total Withdrawal
+    จาก DataFrame สรุป Statement.
+    """
+    # กรองข้อมูลสำหรับ Portfolio ที่เลือกและเรียงตาม Timestamp
+    df_filtered = df_summaries[df_summaries['PortfolioID'] == portfolio_id].sort_values(by='Timestamp').copy()
+
+    if df_filtered.empty:
+        return pd.DataFrame(), 0.0, 0.0, 0.0, 0.0 # คืนค่าเริ่มต้นที่เหมาะสม
+
+    # --- ตรวจสอบและแปลงประเภทข้อมูล ---
+    numeric_cols = ['Balance', 'Deposit', 'Withdrawal', 'Total_Net_Profit', 'Equity']
+    for col in numeric_cols:
+        if col not in df_filtered.columns:
+            df_filtered[col] = 0.0
+
+    # มั่นใจว่าเป็น numeric
+    df_filtered['Balance'] = pd.to_numeric(df_filtered['Balance'], errors='coerce').fillna(0)
+    df_filtered['Deposit'] = pd.to_numeric(df_filtered['Deposit'], errors='coerce').fillna(0)
+    df_filtered['Withdrawal'] = pd.to_numeric(df_filtered['Withdrawal'], errors='coerce').fillna(0)
+    df_filtered['Total_Net_Profit'] = pd.to_numeric(df_filtered['Total_Net_Profit'], errors='coerce').fillna(0)
+    df_filtered['Equity'] = pd.to_numeric(df_filtered['Equity'], errors='coerce').fillna(0)
+
+
+    # --- คำนวณ Metrics ที่ต้องการ ---
+    df_filtered['Equity For Chart'] = df_filtered['Balance']
+
+    total_deposit = df_filtered['Deposit'].sum()
+    total_withdrawal = df_filtered['Withdrawal'].sum()
+
+    initial_balance = df_filtered['Balance'].iloc[0] if not df_filtered.empty else 0
+    final_balance = df_filtered['Balance'].iloc[-1] if not df_filtered.empty else 0
+
+    realized_net_profit = final_balance - initial_balance + total_withdrawal - total_deposit
+    
+    # --- VVVV START EDIT (โค้ดที่แก้ไข) VVVV ---
+    # เปลี่ยนจากการ .sum() เป็นการเลือกค่าจากแถวสุดท้าย (.iloc[-1]) ของข้อมูลที่เรียงตามเวลาแล้ว
+    if not df_filtered.empty:
+        total_net_profit_from_sheet = df_filtered['Total_Net_Profit'].iloc[-1]
+    else:
+        total_net_profit_from_sheet = 0.0
+    # --- ^^^^ END EDIT ^^^^ ---
+
+    return df_filtered, realized_net_profit, total_deposit, total_withdrawal, total_net_profit_from_sheet

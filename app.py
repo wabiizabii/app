@@ -1,28 +1,31 @@
-# app.py (ฉบับสมบูรณ์หลังจัดระเบียบ)
+# app.py (ฉบับแก้ไขและจัดระเบียบใหม่)
 
-# ----------------- ส่วน Import ที่จัดระเบียบใหม่ -----------------
-# Standard Library
+# --- ลำดับการ Import ที่ถูกต้อง ---
+# 1. Standard & Third-Party Libraries
+import streamlit as st
+import pandas as pd
 from datetime import datetime
 
-# Third-Party Libraries
-import pandas as pd
-import streamlit as st
-
-# Local Application Modules
-from config import settings
-from core import analytics_engine, gs_handler
-from ui import (
-    ai_section,
-    chart_section,
-    entry_table_section,
-    log_viewer_section,
-    portfolio_section,
-    sidebar,
-    statement_section,
+# 2. ตั้งค่าหน้าเว็บเป็นคำสั่งแรกสุดของ Streamlit
+# การย้าย st.set_page_config() มาไว้ที่นี่จะแก้ปัญหา StreamlitSetPageConfigMustBeFirstCommandError ได้อย่างถาวร
+st.set_page_config(
+    page_title="Ultimate Chart Dashboard",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
-# -------------------------------------------------------------
 
-st.set_page_config(page_title="Ultimate-Chart", layout="wide")
+# 3. Local Application Modules
+from config import settings
+from core import gs_handler, analytics_engine
+from ui import (
+    sidebar,
+    portfolio_section,
+    statement_section,
+    entry_table_section,
+    chart_section,
+    log_viewer_section,
+    ai_section
+)
 
 # ============================== SESSION STATE INITIALIZATION (GLOBAL SCOPE) ==============================
 if 'initial_portfolio_setup_done' not in st.session_state:
@@ -72,29 +75,45 @@ def main():
     initialize_session_state()
 
     # --- 1. Initial Data Loading & Portfolio Setup ---
-    df_portfolios_gs = gs_handler.load_portfolios_from_gsheets() # <-- แก้ไขแล้ว
+    df_portfolios_gs = gs_handler.load_portfolios_from_gsheets() 
+
     
     if not st.session_state.initial_portfolio_setup_done and not df_portfolios_gs.empty:
         st.session_state.active_portfolio_id_gs = df_portfolios_gs.iloc[0]['PortfolioID']
         st.session_state.active_portfolio_name_gs = df_portfolios_gs.iloc[0]['PortfolioName']
         st.session_state.initial_portfolio_setup_done = True
 
-    # --- 2. Set Current Balance based on Active Portfolio ---
+     # --- 2. Set Current Balance based on Active Portfolio ---
     if st.session_state.active_portfolio_id_gs:
         current_portfolio_details_df = df_portfolios_gs[df_portfolios_gs['PortfolioID'] == st.session_state.active_portfolio_id_gs]
         if not current_portfolio_details_df.empty:
             st.session_state.current_portfolio_details = current_portfolio_details_df.iloc[0].to_dict()
-            st.session_state.latest_statement_equity = None 
-            
-            df_summaries = gs_handler.load_statement_summaries_from_gsheets() # <-- แก้ไขแล้ว
+            st.session_state.latest_statement_equity = None # รีเซ็ตค่าเริ่มต้น
+
+            df_summaries = gs_handler.load_statement_summaries_from_gsheets()
+
             if not df_summaries.empty:
-                latest_equity_df = df_summaries[(df_summaries['PortfolioID'] == str(st.session_state.active_portfolio_id_gs)) & (df_summaries['Equity'].notna()) & (df_summaries['Timestamp'].notna())].copy()
-                if not latest_equity_df.empty:
-                    latest_equity_df.sort_values(by='Timestamp', ascending=False, inplace=True)
-                    latest_equity_value = latest_equity_df.iloc[0]['Equity']
-                    if pd.notna(latest_equity_value):
-                        st.session_state.latest_statement_equity = float(latest_equity_value)
-            
+                df_curve, realized_pnl, total_dep, total_with, net_profit_sheet = analytics_engine.calculate_true_equity_curve(
+                    df_summaries=df_summaries,
+                    portfolio_id=st.session_state.active_portfolio_id_gs
+                )
+
+                # เก็บผลลัพธ์ไว้ใน session_state
+                st.session_state['df_equity_curve_data'] = df_curve
+                st.session_state['realized_profit_loss'] = realized_pnl
+                st.session_state['total_deposit_amount'] = total_dep
+                st.session_state['total_withdrawal_amount'] = total_with
+                st.session_state['total_net_profit_from_sheet'] = net_profit_sheet
+
+                # --- VVVV START EDIT (เพิ่มส่วนนี้เข้ามา) VVVV ---
+                # ตรวจสอบว่า df_curve (ข้อมูลสรุปของพอร์ต) มีข้อมูลหรือไม่
+                if not df_curve.empty and 'Equity' in df_curve.columns:
+                    # ดึงค่า Equity ล่าสุด (จากแถวสุดท้ายที่ถูกเรียงตามเวลาแล้ว)
+                    latest_equity_from_summary = df_curve['Equity'].iloc[-1]
+                    # นำค่าที่ได้ไปอัปเดต session_state
+                    st.session_state.latest_statement_equity = latest_equity_from_summary
+                # --- ^^^^ END EDIT ^^^^ ---
+
             if st.session_state.latest_statement_equity is not None:
                 st.session_state.current_account_balance = st.session_state.latest_statement_equity
             elif 'InitialBalance' in st.session_state.current_portfolio_details and pd.notna(st.session_state.current_portfolio_details['InitialBalance']):
@@ -107,6 +126,8 @@ def main():
         st.session_state.current_portfolio_details = None
         st.session_state.active_portfolio_name_gs = ""
 
+
+        
     # --- 3. Render Sidebar (this also sets the active portfolio from user input) ---
     sidebar.render_sidebar()
     
@@ -140,7 +161,7 @@ def main():
     # --- 5. Render Main Area Sections ---
     with st.container():
         portfolio_section.render_portfolio_manager_expander(df_portfolios_gs)
-        statement_section.render_statement_section()
+        statement_section.render_statement_section(df_portfolios_gs=df_portfolios_gs)
         entry_table_section.render_entry_table_section()
         chart_section.render_chart_section()
         ai_section.render_ai_section()

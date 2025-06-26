@@ -114,7 +114,7 @@ def calculate_fibo_trade_plan(
             extension_results[fibo_level_str] = {}
             extension_ratios = [1.618, 2.618, 4.326]
             for ratio in extension_ratios:
-                ext_price = (high_fibo + range_fibo * ratio) if direction == "Long" else (low_fibo - range_fibo * ratio)
+                ext_price = (high_fibo + range_fibo * (ratio - 1)) if direction == "Long" else (low_fibo - range_fibo * (ratio - 1))
                 extension_prices[fibo_level_str][str(ratio)] = round(ext_price, 5)
                 ext_profit, ext_rr = 0.0, 0.0
                 if stop_dist > 1e-9:
