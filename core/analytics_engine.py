@@ -476,17 +476,18 @@ def generate_weekly_summary(df_all_actual_trades: pd.DataFrame, active_portfolio
             best_Symbol = Symbol_pnl.idxmax()
     
     # 6. สร้างข้อความสรุป
+    # 6. Generate summary text
     summary_lines = []
-    summary_lines.append(f"ภาพรวมสัปดาห์ที่ผ่านมา: กำไรสุทธิ {net_profit:,.2f} USD, Win Rate {win_rate:.1f}%.")
+    summary_lines.append(f"Last week's overview: Net Profit {net_profit:,.2f} USD, Win Rate {win_rate:.1f}%.")
     
     if daily_pnl[best_day] > 0:
-        summary_lines.append(f"🗓️ วันที่ดีที่สุดคือวัน **{best_day}** (กำไร {daily_pnl[best_day]:,.2f} USD).")
+        summary_lines.append(f"🗓️ Your best day was **{best_day}** (Profit {daily_pnl[best_day]:,.2f} USD).")
     
     if daily_pnl[worst_day] < 0:
-        summary_lines.append(f"📉 วันที่ควรระวังคือวัน **{worst_day}** (ขาดทุน {daily_pnl[worst_day]:,.2f} USD).")
+        summary_lines.append(f"📉 Be cautious on **{worst_day}** (Loss {daily_pnl[worst_day]:,.2f} USD).")
 
     if best_Symbol:
-        summary_lines.append(f"💰 สินทรัพย์ที่ทำกำไรสูงสุดคือ **{best_Symbol}**.")
+        summary_lines.append(f"💰 The most profitable asset was **{best_Symbol}**.")
 
     return " ".join(summary_lines)
 

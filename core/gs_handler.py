@@ -673,12 +673,12 @@ def is_portfolio_id_mismatch(account_id_from_report, active_portfolio_id_selecte
     return False
 
 # --- NEWLY ADDED: Helper for checking if a file (hash) is already uploaded ---
-def is_file_already_uploaded(file_hash_to_check, portfolio_id, gc_client):
+def is_file_already_uploaded(file_hash_to_check: str, gc_client): # <--- เอา portfolio_id ออกจาก parameter
     """
     Checks the UploadHistory sheet to see if a file with the given hash
-    has already been uploaded successfully for this portfolio.
+    has already been uploaded successfully, REGARDLESS of portfolio.
     """
-    print(f"DEBUG: [is_file_already_uploaded] Checking hash: {file_hash_to_check} for portfolio: {portfolio_id}")
+    print(f"DEBUG: [is_file_already_uploaded] Checking hash: {file_hash_to_check} system-wide.")
     try:
         upload_history_df = load_upload_history_from_gsheets()
 
@@ -687,23 +687,26 @@ def is_file_already_uploaded(file_hash_to_check, portfolio_id, gc_client):
             return False, None
 
         upload_history_df['FileHash'] = upload_history_df['FileHash'].astype(str)
-        upload_history_df['PortfolioID'] = upload_history_df['PortfolioID'].astype(str)
+        # ไม่จำเป็นต้องแปลง PortfolioID อีกต่อไป
         
+        # --- VVVV START EDIT (โค้ดที่แก้ไข) VVVV ---
+        # ตัดเงื่อนไข `(upload_history_df['PortfolioID'] == str(portfolio_id))` ออกไป
         filtered_history = upload_history_df[
             (upload_history_df['FileHash'] == file_hash_to_check) &
-            (upload_history_df['PortfolioID'] == str(portfolio_id)) &
             (upload_history_df['Status'] == 'Success')
         ]
+        # --- ^^^^ END EDIT ^^^^ ---
         
         if not filtered_history.empty:
             first_match = filtered_history.iloc[0]
             details = {
-                "PortfolioName": first_match.get("PortfolioName", "N/A"),
+                "PortfolioName": first_match.get("PortfolioName", "N/A"), # ยังคงส่งชื่อพอร์ตที่เคยอัปโหลดครั้งแรกกลับไปได้
                 "UploadTimestamp": first_match.get("UploadTimestamp", "N/A"),
                 "ImportBatchID": first_match.get("ImportBatchID", "N/A")
             }
             print(f"DEBUG: [is_file_already_uploaded] Duplicate found. Details: {details}")
             return True, details
+            
         print("DEBUG: [is_file_already_uploaded] No duplicate found.")
         return False, None
 
@@ -881,3 +884,38 @@ def get_full_dashboard_stats(df_all_actual_trades: pd.DataFrame, df_all_summarie
             stats['biggest_loss'] = get_summary_value(['Largest_Loss_Trade', 'Largest Loss Trade'], default_value=stats.get('biggest_loss'))
 
     return stats
+
+def update_portfolio_account_id(gc, portfolio_id_to_find: str, new_account_id: str):
+    """
+    ค้นหาพอร์ตด้วย portfolio_id_to_find (UUID) และอัปเดตคอลัมน์ RegisteredAccountID
+    ด้วย new_account_id ที่ได้จากไฟล์ Report
+    """
+    try:
+        sh = gc.open(settings.GOOGLE_SHEET_NAME)
+        # แก้ไข: ใช้ชื่อชีตจาก settings เพื่อความถูกต้อง
+        portfolios_ws = sh.worksheet(settings.WORKSHEET_PORTFOLIOS)
+
+        # 1. ค้นหาแถวที่ต้องการอัปเดต (สมมติว่า PortfolioID อยู่ในคอลัมน์ที่ 1)
+        cell = portfolios_ws.find(portfolio_id_to_find, in_column=1)
+        if not cell:
+            return False, f"Could not find portfolio with internal ID '{portfolio_id_to_find}'"
+
+        # 2. ค้นหาว่าคอลัมน์ 'RegisteredAccountID' อยู่ที่ตำแหน่งใด
+        headers = portfolios_ws.row_values(1)
+        if 'RegisteredAccountID' not in headers:
+            return False, "'RegisteredAccountID' column not found in the Portfolios sheet."
+        
+        account_id_col_index = headers.index('RegisteredAccountID') + 1
+
+        # 3. อัปเดตค่าใน Cell ที่ถูกต้อง
+        portfolios_ws.update_cell(cell.row, account_id_col_index, str(new_account_id))
+        
+        # 4. ล้างแคชเพื่อให้ UI โหลดข้อมูลพอร์ตใหม่
+        load_portfolios_from_gsheets.cache_clear()
+        
+        return True, f"Successfully linked AccountID '{new_account_id}' to the portfolio."
+        
+    except Exception as e:
+        msg = f"An unexpected error occurred while updating AccountID: {e}"
+        traceback.print_exc()
+        return False, msg

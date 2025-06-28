@@ -45,7 +45,7 @@ WORKSHEET_HEADERS = {
         'ScaleUp_MinGainPercent', 'ScaleUp_RiskIncrementPercent', 'ScaleDown_MaxLossPercent',
         'ScaleDown_LowWinRate', 'ScaleDown_RiskDecrementPercent', 'MinRiskPercentAllowed',
         'MaxRiskPercentAllowed', 'CurrentRiskPercent',
-        'AccountID' # <--- เพิ่มคอลัมน์ AccountID ตรงนี้
+        'RegisteredAccountID' # <--- เพิ่มคอลัมน์ AccountID ตรงนี้
     ],
 
     # ใช้โครงสร้างที่ถูกต้องสำหรับ PlannedTradeLogs (เหลือแค่ครั้งเดียว)

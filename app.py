@@ -141,7 +141,7 @@ def main():
             current_week_key = f"summary_shown_{datetime.now().isocalendar().year}_{datetime.now().isocalendar().week}"
             if not st.session_state.get(current_week_key, False):
                 with st.container(border=True):
-                    st.markdown("##### 📝 สรุปผลงานสัปดาห์ที่ผ่านมา") 
+                    st.markdown("##### 📝 Last Week's Performance Summary") 
                     st.info(summary_message)
                 st.session_state[current_week_key] = True
         
