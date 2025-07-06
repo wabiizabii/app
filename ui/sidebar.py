@@ -66,7 +66,7 @@ def render_sidebar():
                 st.session_state['current_portfolio_details'] = None 
                 
                 st.session_state['latest_statement_equity'] = None
-                st.rerun()
+                #st.rerun()
 
         st.selectbox(
             "Select Portfolio:", 

@@ -1,10 +1,11 @@
-# ui/portfolio_section.py (ฉบับแก้ไขสมบูรณ์)
+# ui/portfolio_section.py (ฉบับแก้ไขสมบูรณ์ - แก้ไขทุกปัญหาที่พบ)
+
 import streamlit as st
 import pandas as pd
 from datetime import date
 # from .ai_section import render_ai_insights # Assuming this will be created later
 from core import gs_handler, portfolio_logic, analytics_engine
-from config import settings # <<<< ตรวจสอบว่ามีบรรทัดนี้อยู่แล้ว (สำคัญ!)
+from config import settings # ตรวจสอบว่ามีบรรทัดนี้อยู่แล้ว (สำคัญ!)
 
 # =============================================================================
 # Helper & Rendering Functions
@@ -16,7 +17,6 @@ def safe_float_convert(value, default=0.0):
     """Safely converts a value to a float, handling None, empty strings, or text."""
     if value is None:
         return default
-    # จัดการกรณีที่ค่าเป็น string 'None' หรือค่าว่าง
     if isinstance(value, str) and (value.strip().lower() == 'none' or value.strip() == ''):
         return default
     try:
@@ -45,9 +45,9 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
     # --- Section 1: Title and Details Box ---
     with st.container(border=True):
         portfolio_name = details.get('PortfolioName', 'N/A')
-        account_size = float(details.get('InitialBalance', 0))
+        account_size = safe_float_convert(details.get('InitialBalance', 0)) # ใช้ safe_float_convert
         prog_type = details.get('ProgramType', 'N/A')
-        profit_target = details.get('ProfitTargetPercent', 0)
+        profit_target = safe_float_convert(details.get('ProfitTargetPercent', 0)) # ใช้ safe_float_convert
         status = details.get('Status', 'N/A')
 
         title_part = f"<h5 style='margin: 0; padding: 0;'>Portfolio Overview: {portfolio_name}</h5>"
@@ -85,28 +85,28 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
                     st.markdown("**Consecutive Wins/Losses:**")
                     wins = advanced_stats.get('max_consecutive_wins')
                     loss = advanced_stats.get('max_consecutive_losses')
-                    st.markdown(f"• Wins: `{int(wins)} trades`" if pd.notna(wins) else "• Wins: `N/A`")
-                    st.markdown(f"• Losses: `{int(loss)} trades`" if pd.notna(loss) else "• Losses: `N/A`")
+                    st.markdown(f"• Wins: `{int(safe_float_convert(wins))} trades`" if pd.notna(wins) else "• Wins: `N/A`") # ใช้ safe_float_convert
+                    st.markdown(f"• Losses: `{int(safe_float_convert(loss))} trades`" if pd.notna(loss) else "• Losses: `N/A`") # ใช้ safe_float_convert
                 
                 with adv_col2:
                     st.markdown("**Biggest Win/Loss:**")
-                    win_l = advanced_stats.get('biggest_win_long')
-                    loss_l = advanced_stats.get('biggest_loss_long')
+                    win_l = safe_float_convert(advanced_stats.get('biggest_win_long')) # ใช้ safe_float_convert
+                    loss_l = safe_float_convert(advanced_stats.get('biggest_loss_long')) # ใช้ safe_float_convert
                     win_l_display = f"<font color='#28a745'>{win_l:,.2f}</font>" if pd.notna(win_l) else "N/A"
                     loss_l_display = f"<font color='#dc3545'>{loss_l:,.2f}</font>" if pd.notna(loss_l) else "N/A"
                     st.markdown(f"• Long: {win_l_display} / {loss_l_display}", unsafe_allow_html=True)
 
-                    win_s = advanced_stats.get('biggest_win_short')
-                    loss_s = advanced_stats.get('biggest_loss_short')
+                    win_s = safe_float_convert(advanced_stats.get('biggest_win_short')) # ใช้ safe_float_convert
+                    loss_s = safe_float_convert(advanced_stats.get('biggest_loss_short')) # ใช้ safe_float_convert
                     win_s_display = f"<font color='#28a745'>{win_s:,.2f}</font>" if pd.notna(win_s) else "N/A"
                     loss_s_display = f"<font color='#dc3545'>{loss_s:,.2f}</font>" if pd.notna(loss_s) else "N/A"
                     st.markdown(f"• Short: {win_s_display} / {loss_s_display}", unsafe_allow_html=True)
 
                     st.markdown("**Consistency:**")
-                    conc = advanced_stats.get('profit_concentration', 0)
-                    days = advanced_stats.get('active_trading_days', 0)
+                    conc = safe_float_convert(advanced_stats.get('profit_concentration', 0)) # ใช้ safe_float_convert
+                    days = safe_float_convert(advanced_stats.get('active_trading_days', 0)) # ใช้ safe_float_convert
                     st.markdown(f"• Profit Conc.: `{conc:.1f}%`" if conc > 0 else "• Profit Conc.: `N/A`")
-                    st.markdown(f"• Active Days: `{days} days`")
+                    st.markdown(f"• Active Days: `{int(days)} days`" if pd.notna(days) else "• Active Days: `N/A`") # ใช้ int(days)
 
     # Right Column (Performance Metrics)
     with main_col2:
@@ -145,25 +145,25 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
                 sub_col1, sub_col2 = st.columns(2)
                 
                 with sub_col1:
-                    st.markdown(format_metric("Total Trades", full_stats.get('Total_Trades')), unsafe_allow_html=True)
-                    st.markdown(format_metric("Profit Trades", full_stats.get('Profit_Trades_Count')), unsafe_allow_html=True)
-                    st.markdown(format_metric("Loss Trades", full_stats.get('Loss_Trades_Count')), unsafe_allow_html=True)
-                    st.markdown(format_metric("Breakeven Trades", full_stats.get('Breakeven_Trades_Count')), unsafe_allow_html=True)
-                    st.markdown(format_metric("Long Trades", full_stats.get('Long_Trades_Count')), unsafe_allow_html=True)
-                    st.markdown(format_metric("Short Trades", full_stats.get('Short_Trades_Count')), unsafe_allow_html=True)
-                    st.markdown(format_metric("Best Profit", full_stats.get('Largest_Profit_Trade'), currency=True), unsafe_allow_html=True)
-                    st.markdown(format_metric("Biggest Loss", full_stats.get('Largest_Loss_Trade'), currency=True), unsafe_allow_html=True)
-                    st.markdown(format_metric("Avg. Trade Size", full_stats.get('Average_Trade_Size'), ratio=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Total Trades", safe_float_convert(full_stats.get('Total_Trades'))), unsafe_allow_html=True)
+                    st.markdown(format_metric("Profit Trades", safe_float_convert(full_stats.get('Profit_Trades_Count'))), unsafe_allow_html=True)
+                    st.markdown(format_metric("Loss Trades", safe_float_convert(full_stats.get('Loss_Trades_Count'))), unsafe_allow_html=True)
+                    st.markdown(format_metric("Breakeven Trades", safe_float_convert(full_stats.get('Breakeven_Trades_Count'))), unsafe_allow_html=True)
+                    st.markdown(format_metric("Long Trades", safe_float_convert(full_stats.get('Long_Trades_Count'))), unsafe_allow_html=True)
+                    st.markdown(format_metric("Short Trades", safe_float_convert(full_stats.get('Short_Trades_Count'))), unsafe_allow_html=True)
+                    st.markdown(format_metric("Best Profit", safe_float_convert(full_stats.get('Largest_Profit_Trade')), currency=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Biggest Loss", safe_float_convert(full_stats.get('Largest_Loss_Trade')), currency=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Avg. Trade Size", safe_float_convert(full_stats.get('Average_Trade_Size')), ratio=True), unsafe_allow_html=True)
 
                 with sub_col2:    
-                    st.markdown(format_metric("Total Net Profit", full_stats.get('Total_Net_Profit'), currency=True, color_cond=True), unsafe_allow_html=True)
-                    st.markdown(format_metric("Gross Profit", full_stats.get('Gross_Profit'), currency=True), unsafe_allow_html=True)
-                    st.markdown(format_metric("Gross Loss", full_stats.get('Gross_Loss'), currency=True), unsafe_allow_html=True)
-                    st.markdown(format_metric("Win Rate", full_stats.get('Win_Rate'), percent=True), unsafe_allow_html=True)
-                    st.markdown(format_metric("Profit Factor", full_stats.get('Profit_Factor'), ratio=True, color_cond=True), unsafe_allow_html=True)
-                    st.markdown(format_metric("Avg. Profit", full_stats.get('Average_Profit_Trade'), currency=True), unsafe_allow_html=True)
-                    st.markdown(format_metric("Avg. Loss", full_stats.get('Average_Loss_Trade'), currency=True), unsafe_allow_html=True)
-                    st.markdown(format_metric("Expectancy", full_stats.get('Expected_Payoff'), currency=True, color_cond=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Total Net Profit", safe_float_convert(full_stats.get('Total_Net_Profit')), currency=True, color_cond=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Gross Profit", safe_float_convert(full_stats.get('Gross_Profit')), currency=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Gross Loss", safe_float_convert(full_stats.get('Gross_Loss')), currency=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Win Rate", safe_float_convert(full_stats.get('Win_Rate')), percent=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Profit Factor", safe_float_convert(full_stats.get('Profit_Factor')), ratio=True, color_cond=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Avg. Profit", safe_float_convert(full_stats.get('Average_Profit_Trade')), currency=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Avg. Loss", safe_float_convert(full_stats.get('Average_Loss_Trade')), currency=True), unsafe_allow_html=True)
+                    st.markdown(format_metric("Expectancy", safe_float_convert(full_stats.get('Expected_Payoff')), currency=True, color_cond=True), unsafe_allow_html=True)
 
     st.markdown("---")
     st.subheader("📊 Portfolio Returns & Equity")
@@ -175,13 +175,13 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
     if realized_net_profit is not None:
         col_rp, col_dep, col_wit, col_net_from_sheet = st.columns(4)
         with col_rp:
-            st.metric("Account Equity Change", f"{realized_net_profit:,.2f} USD")
+            st.metric("Account Equity Change", f"{safe_float_convert(realized_net_profit):,.2f} USD")
         with col_dep:
-            st.metric("Total Deposits", f"{total_deposit:,.2f} USD")
+            st.metric("Total Deposits", f"{safe_float_convert(total_deposit):,.2f} USD")
         with col_wit:
-            st.metric("Total Withdrawals", f"{total_withdrawal:,.2f} USD")
+            st.metric("Total Withdrawals", f"{safe_float_convert(total_withdrawal):,.2f} USD")
         with col_net_from_sheet: 
-            st.metric("Total Net Profit (from Trades)", f"{total_net_profit_from_sheet:,.2f} USD")
+            st.metric("Total Net Profit (from Trades)", f"{safe_float_convert(total_net_profit_from_sheet):,.2f} USD")
     else:
         st.info("No portfolio return data available. Please select a portfolio.")
 
@@ -200,20 +200,20 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
             worst_pair_data = insights.get('worst_pair')
             pnl_data = insights.get('long_vs_short_pnl')
 
-            if best_day_data and best_day_data[1] > 0:
-                st.markdown(f"📈 **วันทำกำไรดีที่สุด:** วัน{best_day_data[0]} (**+{best_day_data[1]:,.2f} USD**)")
+            if best_day_data and safe_float_convert(best_day_data[1]) > 0:
+                st.markdown(f"📈 **วันทำกำไรดีที่สุด:** วัน{best_day_data[0]} (**+{safe_float_convert(best_day_data[1]):,.2f} USD**)")
             
-            if worst_day_data and worst_day_data[1] < 0:
-                st.markdown(f"📉 **วันขาดทุนหนักที่สุด:** วัน{worst_day_data[0]} (**{worst_day_data[1]:,.2f} USD**)")
+            if worst_day_data and safe_float_convert(worst_day_data[1]) < 0:
+                st.markdown(f"📉 **วันขาดทุนหนักที่สุด:** วัน{worst_day_data[0]} (**{safe_float_convert(worst_day_data[1]):,.2f} USD**)")
 
-            if best_pair_data and best_pair_data[1] > 0:
-                st.markdown(f"💰 **สินทรัพย์ทำเงิน:** {best_pair_data[0]} (**+{best_pair_data[1]:,.2f} USD**)")
+            if best_pair_data and safe_float_convert(best_pair_data[1]) > 0:
+                st.markdown(f"💰 **สินทรัพย์ทำเงิน:** {best_pair_data[0]} (**+{safe_float_convert(best_pair_data[1]):,.2f} USD**)")
 
-            if worst_pair_data and worst_pair_data[1] < 0:
-                st.markdown(f"⚠️ **สินทรัพย์ที่ควรระวัง:** {worst_pair_data[0]} (**{worst_pair_data[1]:,.2f} USD**)")
+            if worst_pair_data and safe_float_convert(worst_pair_data[1]) < 0:
+                st.markdown(f"⚠️ **สินทรัพย์ที่ควรระวัง:** {worst_pair_data[0]} (**{safe_float_convert(worst_pair_data[1]):,.2f} USD**)")
             
             if pnl_data:
-                st.markdown(f"↕️ **กำไร/ขาดทุน (Long vs Short):** `{pnl_data[0]:,.2f}` vs `{pnl_data[1]:,.2f}`")
+                st.markdown(f"↕️ **กำไร/ขาดทุน (Long vs Short):** `{safe_float_convert(pnl_data[0]):,.2f}` vs `{safe_float_convert(pnl_data[1]):,.2f}`")
 
 
 # =============================================================================            
@@ -258,7 +258,7 @@ def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, 
         with form_c1:
             form_new_portfolio_name = st.text_input("Portfolio Name*", value=portfolio_to_edit_data.get("PortfolioName", ""), key=f"{key_prefix}_name")
         with form_c2:
-            form_new_initial_balance = st.number_input("Initial Balance*", min_value=0.01, value=float(portfolio_to_edit_data.get("InitialBalance", 10000.0)), format="%.2f", key=f"{key_prefix}_balance")
+            form_new_initial_balance = st.number_input("Initial Balance*", min_value=0.01, value=safe_float_convert(portfolio_to_edit_data.get("InitialBalance", 10000.0)), format="%.2f", key=f"{key_prefix}_balance") # ใช้ safe_float_convert
         account_type_options = ["STANDARD", "CENT", "PROP_FIRM"] # เพิ่มตัวเลือกประเภทบัญชี
         default_account_type = portfolio_to_edit_data.get("AccountType", "STANDARD") # ดึงค่าเดิมถ้าเป็นโหมดแก้ไข
         account_type_index = account_type_options.index(default_account_type) if default_account_type in account_type_options else 0
@@ -281,29 +281,32 @@ def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, 
             form_new_evaluation_step_widget = st.selectbox("Evaluation Step", options=evaluation_step_options, index=eval_index, key=f"{key_prefix}_eval_step")
         
         # Initialize widget value variables to a default (like 0.0 or None)
-        prop_profit_target_widget, prop_daily_loss_widget, prop_total_stopout_widget, prop_leverage_widget, prop_min_days_widget = (0.0, 0.0, 0.0, 0.0, 0)
-        comp_end_date_widget, comp_profit_target_widget, comp_goal_metric_widget, comp_daily_loss_widget, comp_total_stopout_widget = (None, 0.0, "", 0.0, 0.0)
-        # <<<< แก้ไขตรงนี้: ใช้ safe_float_convert สำหรับค่าเริ่มต้น pers_overall_profit_widget, pers_weekly_profit_widget, pers_max_dd_overall_widget >>>>
-        pers_overall_profit_widget = safe_float_convert(portfolio_to_edit_data.get("OverallProfitTarget"), 0.0)
-        pers_weekly_profit_widget = safe_float_convert(portfolio_to_edit_data.get("WeeklyProfitTarget"), 0.0)
-        pers_max_dd_overall_widget = safe_float_convert(portfolio_to_edit_data.get("MaxAcceptableDrawdownOverall"), 0.0)
-        # <<<< สิ้นสุดการแก้ไข >>>>
-        # <<<< เพิ่มตัวแปรนี้เข้ามา และกำหนดค่าเริ่มต้นให้เหมาะสมกับทุกเงื่อนไข >>>>
-        pers_daily_loss_limit_widget = safe_float_convert(portfolio_to_edit_data.get("DailyLossLimitPercent"), 2.0)
-        # <<<< สิ้นสุดการเพิ่ม >>>>
+        # ตัวแปรเหล่านี้ต้องมีค่าเสมอ ไม่ว่าจะถูกแสดงใน UI หรือไม่
+        prop_profit_target_widget, prop_leverage_widget, prop_min_days_widget = (0.0, 0.0, 0)
+        prop_daily_loss_widget, prop_total_stopout_widget = (0.0, 0.0) # สำหรับ Prop Firm
+        
+        comp_end_date_widget, comp_goal_metric_widget = (None, "")
+        comp_profit_target_widget, comp_daily_loss_widget, comp_total_stopout_widget = (0.0, 0.0, 0.0) # สำหรับ Trading Competition
 
+        pers_overall_profit_widget, pers_weekly_profit_widget, pers_max_dd_overall_widget = (0.0, 0.0, 0.0)
+        pers_target_end_date_widget, pers_daily_profit_widget = (None, 0.0) # สำหรับ Personal Account
+        pers_daily_loss_limit_widget = safe_float_convert(portfolio_to_edit_data.get("DailyLossLimitPercent"), 2.0) # สำหรับ Personal Account
+        
         scaling_freq_val_widget, su_wr_val_widget, sd_loss_val_widget, min_risk_val_widget, su_gain_val_widget, sd_wr_val_widget, max_risk_val_widget, su_inc_val_widget, sd_dec_val_widget, current_risk_s_val_widget = ("", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
+        # <<<< แก้ไขตรงนี้: ใช้ safe_float_convert ใน input เลย >>>>
         if selected_program_type in ["Prop Firm Challenge", "Funded Account"]:
             st.markdown("**Prop Firm/Funded Rules:**")
             f_pf1, f_pf2, f_pf3 = st.columns(3)
-            with f_pf1: prop_profit_target_widget = st.number_input("Profit Target %*", value=float(portfolio_to_edit_data.get("ProfitTargetPercent", 8.0)), format="%.1f", key=f"{key_prefix}_prop_profit")
-            with f_pf2: prop_daily_loss_widget = st.number_input("Daily Loss Limit %*", value=float(portfolio_to_edit_data.get("DailyLossLimitPercent", 5.0)), format="%.1f", key=f"{key_prefix}_prop_daily_loss")
-            with f_pf3: prop_total_stopout_widget = st.number_input("Total Stopout %*", value=float(portfolio_to_edit_data.get("TotalStopoutPercent", 10.0)), format="%.1f", key=f"{key_prefix}_prop_total_loss")
+            with f_pf1: prop_profit_target_widget = st.number_input("Profit Target %*", value=safe_float_convert(portfolio_to_edit_data.get("ProfitTargetPercent", 8.0)), format="%.1f", key=f"{key_prefix}_prop_profit")
+            with f_pf2: prop_daily_loss_widget = st.number_input("Daily Loss Limit %*", value=safe_float_convert(portfolio_to_edit_data.get("DailyLossLimitPercent", 5.0)), format="%.1f", key=f"{key_prefix}_prop_daily_loss")
+            with f_pf3: prop_total_stopout_widget = st.number_input("Total Stopout %*", value=safe_float_convert(portfolio_to_edit_data.get("TotalStopoutPercent", 10.0)), format="%.1f", key=f"{key_prefix}_prop_total_loss")
             f_pf_col1, f_pf_col2 = st.columns(2)
-            with f_pf_col1: prop_leverage_widget = st.number_input("Leverage", value=float(portfolio_to_edit_data.get("Leverage", 100.0)), format="%.0f", key=f"{key_prefix}_prop_leverage")
-            with f_pf_col2: prop_min_days_widget = st.number_input("Min. Trading Days", value=int(portfolio_to_edit_data.get("MinTradingDays", 0)), step=1, key=f"{key_prefix}_prop_min_days")
+            with f_pf_col1: prop_leverage_widget = st.number_input("Leverage", value=safe_float_convert(portfolio_to_edit_data.get("Leverage", 100.0)), format="%.0f", key=f"{key_prefix}_prop_leverage")
+            with f_pf_col2: prop_min_days_widget = st.number_input("Min. Trading Days", value=int(safe_float_convert(portfolio_to_edit_data.get("MinTradingDays", 0))), step=1, key=f"{key_prefix}_prop_min_days")
+        # <<<< สิ้นสุดการแก้ไข >>>>
 
+        # <<<< แก้ไขตรงนี้: ใช้ safe_float_convert ใน input เลย >>>>
         if selected_program_type == "Trading Competition":
             st.markdown("**Competition Details:**")
             f_tc1, f_tc2 = st.columns(2)
@@ -314,12 +317,14 @@ def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, 
                     try: default_comp_date = pd.to_datetime(comp_date_str).date()
                     except (ValueError, TypeError): default_comp_date = None
                 comp_end_date_widget = st.date_input("Competition End Date", value=default_comp_date, key=f"{key_prefix}_comp_date")
-                comp_profit_target_widget = st.number_input("Profit Target % (Comp)", value=float(portfolio_to_edit_data.get("ProfitTargetPercent", 20.0)), format="%.1f", key=f"{key_prefix}_comp_profit")           
+                comp_profit_target_widget = st.number_input("Profit Target % (Comp)", value=safe_float_convert(portfolio_to_edit_data.get("ProfitTargetPercent", 20.0)), format="%.1f", key=f"{key_prefix}_comp_profit")           
             with f_tc2:
                 comp_goal_metric_widget = st.text_input("Goal Metric (Comp)", value=portfolio_to_edit_data.get("GoalMetric", ""), help="e.g. %Gain, ROI", key=f"{key_prefix}_comp_goal")
-                comp_daily_loss_widget = st.number_input("Daily Loss Limit % (Comp)", value=float(portfolio_to_edit_data.get("DailyLossLimitPercent", 5.0)), format="%.1f", key=f"{key_prefix}_comp_daily_loss")
-                comp_total_stopout_widget = st.number_input("Total Stopout % (Comp)", value=float(portfolio_to_edit_data.get("TotalStopoutPercent", 10.0)), format="%.1f", key=f"{key_prefix}_comp_total_stopout")
+                comp_daily_loss_widget = st.number_input("Daily Loss Limit % (Comp)", value=safe_float_convert(portfolio_to_edit_data.get("DailyLossLimitPercent", 5.0)), format="%.1f", key=f"{key_prefix}_comp_daily_loss")
+                comp_total_stopout_widget = st.number_input("Total Stopout % (Comp)", value=safe_float_convert(portfolio_to_edit_data.get("TotalStopoutPercent", 10.0)), format="%.1f", key=f"{key_prefix}_comp_total_stopout")
+        # <<<< สิ้นสุดการแก้ไข >>>>
 
+        # <<<< แก้ไขตรงนี้: ใช้ safe_float_convert ใน input เลย >>>>
         if selected_program_type == "Personal Account":
             st.markdown("**Personal Goals (Optional):**")
             f_ps1, f_ps2 = st.columns(2)
@@ -336,21 +341,19 @@ def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, 
                 pers_target_end_date_widget = st.date_input("Target End Date", value=default_target_date, key=f"{key_prefix}_pers_end_date")
                 pers_daily_profit_widget = st.number_input("Daily Profit Target ($)", value=safe_float_convert(portfolio_to_edit_data.get("DailyProfitTarget"), 0.0), format="%.2f", key=f"{key_prefix}_pers_daily_profit")
                 
-                # <<<< เพิ่มบรรทัดนี้เข้ามาใน Personal Account >>>>
                 pers_daily_loss_limit_widget = st.number_input(
                     "Daily Drawdown Limit (%)",
                     min_value=0.1, max_value=100.0,
-                    value=safe_float_convert(portfolio_to_edit_data.get("DailyLossLimitPercent"), 2.0), # ใช้ safe_float_convert ตรงนี้
+                    value=safe_float_convert(portfolio_to_edit_data.get("DailyLossLimitPercent"), 2.0),
                     step=0.1, format="%.1f",
                     key=f"{key_prefix}_pers_daily_dd_limit"
                 )
-                # <<<< สิ้นสุดการเพิ่ม >>>>
-
+        # <<<< สิ้นสุดการแก้ไข >>>>
 
         st.markdown("**Scaling Manager Settings (Optional):**")
         enable_scaling_checkbox_val = st.checkbox("Enable Scaling Manager?", value=str(portfolio_to_edit_data.get("EnableScaling", "False")).upper() == 'TRUE', key=f"{key_prefix}_scaling_cb")
 
-        # You would add the scaling manager inputs here if enabled
+        # ... (โค้ดส่วน Notes และ Submit Button เหมือนเดิม)
         
         notes_val_area_widget = st.text_area("Additional Notes", value=portfolio_to_edit_data.get("Notes", ""), key=f"{key_prefix}_notes")
 
@@ -370,14 +373,10 @@ def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, 
                     form_notes_val=notes_val_area_widget,
                     form_profit_target_val=prop_profit_target_widget,
                     # <<<< แก้ไขตรงนี้: ส่งค่า DailyLossLimitPercent ที่ถูกต้องตาม ProgramType >>>>
-                    # ถ้าเป็น Prop Firm/Funded ให้ใช้ prop_daily_loss_widget
-                    # ถ้าเป็น Competition ให้ใช้ comp_daily_loss_widget
-                    # ถ้าเป็น Personal Account ให้ใช้ pers_daily_loss_limit_widget (ที่เราเพิ่งเพิ่ม)
-                    # ถ้าไม่ใช่ ProgramType ข้างบน ให้เป็น 0.0 (หรือค่า default อื่นๆ)
                     form_daily_loss_val=prop_daily_loss_widget if selected_program_type in ["Prop Firm Challenge", "Funded Account"] else \
                                         comp_daily_loss_widget if selected_program_type == "Trading Competition" else \
                                         pers_daily_loss_limit_widget if selected_program_type == "Personal Account" else \
-                                        0.0,
+                                        0.0, # <-- ส่งค่า DailyLossLimitPercent จาก widget ที่เกี่ยวข้อง
                     # <<<< สิ้นสุดการแก้ไข >>>>
                     form_total_stopout_val=prop_total_stopout_widget,
                     form_leverage_val=prop_leverage_widget,
@@ -392,7 +391,7 @@ def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, 
                     form_pers_weekly_profit_val=pers_weekly_profit_widget,
                     form_pers_daily_profit_val=pers_daily_profit_widget,
                     form_pers_max_dd_overall_val=pers_max_dd_overall_widget,
-                    form_pers_max_dd_daily_val=0.0, # <<<< บรรทัดนี้ถูกต้องแล้ว (เป็น 0.0 เพราะเราส่งค่า DailyLossLimitPercent แยกไปแล้ว)
+                    form_pers_max_dd_daily_val=pers_daily_loss_limit_widget if selected_program_type == "Personal Account" else 0.0, # <<<< แก้ไขตรงนี้: ต้องส่งค่าจาก widget pers_daily_loss_limit_widget >>>>
                     form_enable_scaling_checkbox_val=enable_scaling_checkbox_val,
                     form_scaling_freq_val=scaling_freq_val_widget,
                     form_su_wr_val=su_wr_val_widget,
