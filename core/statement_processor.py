@@ -337,11 +337,24 @@ def extract_data_from_report_content(file_content_input: bytes):
                 calculated_deposit += profit_val
             
             if transaction_type != 'Unknown':
-                itemized_deposit_withdrawal_logs.append({"TransactionID": str(row.get('Deal_ID', '')), "DateTime": str(row.get('Time_Deal', '')), "Type": transaction_type, "Amount": profit_val, "Comment": row.get('Comment_Deal', '')})
-
+                itemized_deposit_withdrawal_logs.append({
+                    "TransactionID": str(row.get('Deal_ID', '')), 
+                    "DateTime": str(row.get('Time_Deal', '')), 
+                    "Type": transaction_type, 
+                    "Amount": profit_val, 
+                    "Comment": row.get('Comment_Deal', '')
+                })
         extracted_data['balance_summary']['Deposit'] = calculated_deposit
         extracted_data['balance_summary']['Withdrawal'] = calculated_withdrawal
-        extracted_data['deposit_withdrawal_logs'] = itemized_deposit_withdrawal_logs
+
+        # --- จุดที่แก้ไข ---
+        # แปลง list of dictionaries ให้เป็น DataFrame ที่ถูกต้องก่อนส่งต่อ
+        if itemized_deposit_withdrawal_logs:
+            # ถ้ามีข้อมูล ให้สร้าง DataFrame จาก list นั้น
+            extracted_data['deposit_withdrawal_logs'] = itemized_deposit_withdrawal_logs
+        else:
+            # ถ้าไม่มีข้อมูล ก็ให้เป็น DataFrame ที่ว่างเปล่า
+            extracted_data['deposit_withdrawal_logs'] = pd.DataFrame()
 
     # --- 5. การตัดสินใจสุดท้าย (FINAL DECISION LOGIC) ---
     if has_open_positions_flag:
@@ -352,18 +365,28 @@ def extract_data_from_report_content(file_content_input: bytes):
         if 'Balance' in extracted_data['balance_summary']:
              extracted_data['balance_summary']['Equity'] = extracted_data['balance_summary']['Balance']
 
-    # --- 6. ประกอบร่างสุดท้าย ---
+    # --- 6. ประกอบร่างสุดท้าย (โค้ดที่แก้ไขสมบูรณ์แล้ว) ---
     final_summary_data = {h: 0.0 for h in settings.WORKSHEET_HEADERS[settings.WORKSHEET_STATEMENT_SUMMARIES]}
     final_summary_data['PortfolioID'] = extracted_data['portfolio_details'].get('account_id', '')
     final_summary_data['PortfolioName'] = extracted_data['portfolio_details'].get('account_name', '')
+    
     combined_summary = {**extracted_data['balance_summary'], **extracted_data['results_summary']}
+    
     for key, value in combined_summary.items():
-        if key in final_summary_data: final_summary_data[key] = value
-        elif key == 'Total_Net_Profit_Text' and 'Total_Net_Profit' not in final_summary_data: final_summary_data['Total_Net_Profit'] = value
-            
+        if key in final_summary_data: 
+            final_summary_data[key] = value
+        elif key == 'Total_Net_Profit_Text' and 'Total_Net_Profit' not in final_summary_data: 
+            final_summary_data['Total_Net_Profit'] = value
+    
+    # ===================================================================
+    # ===== บรรทัดแก้ไขที่สำคัญที่สุด: บังคับให้ใส่ค่า Balance และ Equity =====
+    # ===================================================================
+    if 'Balance' in extracted_data['balance_summary']:
+        final_summary_data['Balance'] = extracted_data['balance_summary']['Balance']
+    if 'Equity' in extracted_data['balance_summary']:
+        final_summary_data['Equity'] = extracted_data['balance_summary']['Equity']
+    # ===================================================================
+
     extracted_data['final_summary_data'] = final_summary_data
-    print("\n--- DEBUG: Content of extracted_data['results_summary'] ---")
-    for key, value in extracted_data['results_summary'].items():
-        print(f"'{key}': {value}")
-    print("----------------------------------------------------------")
+    
     return extracted_data

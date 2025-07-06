@@ -45,7 +45,8 @@ def prepare_new_portfolio_data_for_gsheet(
     form_sd_dec_val: float,
     form_min_risk_val: float,
     form_max_risk_val: float,
-    form_current_risk_val: float
+    form_current_risk_val: float,
+    account_type_in_form: str # <<<< จุดที่ 2: เพิ่ม 'account_type_in_form: str' ตรงนี้
 ):
     new_id_value = str(uuid.uuid4())
     creation_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -59,7 +60,8 @@ def prepare_new_portfolio_data_for_gsheet(
         'InitialBalance': form_new_initial_balance_in_form,
         'CreationDate': creation_date_str,
         'Notes': form_notes_val,
-        'AccountID': '' # <--- เพิ่มตรงนี้ เพื่อให้ AccountID ว่างเปล่าเมื่อสร้างพอร์ตใหม่
+        'AccountID': '', # <--- AccountID มีอยู่แล้ว
+        'AccountType': account_type_in_form # <<<< จุดที่ 3: เพิ่ม 'AccountType' เข้าไปใน Dictionary
     }
 
     if selected_program_type_to_use_in_form in ["Prop Firm Challenge", "Funded Account"]:

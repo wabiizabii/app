@@ -1,14 +1,29 @@
-# ui/portfolio_section.py (English Version)
+# ui/portfolio_section.py (ฉบับแก้ไขสมบูรณ์)
 import streamlit as st
 import pandas as pd
-import uuid
 from datetime import date
-from .ai_section import render_ai_insights # Assuming ai_section will be translated separately
+# from .ai_section import render_ai_insights # Assuming this will be created later
 from core import gs_handler, portfolio_logic, analytics_engine
+from config import settings # <<<< ตรวจสอบว่ามีบรรทัดนี้อยู่แล้ว (สำคัญ!)
 
 # =============================================================================
 # Helper & Rendering Functions
 # =============================================================================
+
+# <<<< เพิ่มฟังก์ชัน safe_float_convert ตรงนี้ (หากยังไม่มีในไฟล์นี้) >>>>
+# ฟังก์ชัน safe_float_convert คัดลอกมาจาก ui/sidebar.py
+def safe_float_convert(value, default=0.0):
+    """Safely converts a value to a float, handling None, empty strings, or text."""
+    if value is None:
+        return default
+    # จัดการกรณีที่ค่าเป็น string 'None' หรือค่าว่าง
+    if isinstance(value, str) and (value.strip().lower() == 'none' or value.strip() == ''):
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+# <<<< สิ้นสุดการเพิ่ม >>>>
 
 def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_summaries: pd.DataFrame):
     """
@@ -170,28 +185,40 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
     else:
         st.info("No portfolio return data available. Please select a portfolio.")
 
-    df_equity_curve_data = st.session_state.get('df_equity_curve_data')
-    if df_equity_curve_data is not None and not df_equity_curve_data.empty:
-        st.markdown("---")
-        st.markdown("#### True Equity Curve Chart")
-        if 'Timestamp' in df_equity_curve_data.columns and 'Equity For Chart' in df_equity_curve_data.columns:
-            st.line_chart(df_equity_curve_data, x='Timestamp', y='Equity For Chart')
-        else:
-            st.warning("Equity curve data is incomplete (missing Timestamp or Equity For Chart column).")
-    else:
-        st.info("No data available to generate the equity curve chart.")
-
     st.subheader("🤖 AI-Powered Insights")
     with st.container(border=True):
+        # ดึงข้อมูล Insights จาก analytics_engine
         insights = analytics_engine.get_ai_powered_insights(df_actual_trades, active_id)
+        
         if not insights:
             st.info("Not enough data to generate insights.")
         else:
-            render_ai_insights(insights) # Note: this function also needs translation inside ai_section.py
+            # จัดการแสดงผลให้สวยงาม
+            best_day_data = insights.get('best_day')
+            worst_day_data = insights.get('worst_day')
+            best_pair_data = insights.get('best_pair')
+            worst_pair_data = insights.get('worst_pair')
+            pnl_data = insights.get('long_vs_short_pnl')
+
+            if best_day_data and best_day_data[1] > 0:
+                st.markdown(f"📈 **วันทำกำไรดีที่สุด:** วัน{best_day_data[0]} (**+{best_day_data[1]:,.2f} USD**)")
+            
+            if worst_day_data and worst_day_data[1] < 0:
+                st.markdown(f"📉 **วันขาดทุนหนักที่สุด:** วัน{worst_day_data[0]} (**{worst_day_data[1]:,.2f} USD**)")
+
+            if best_pair_data and best_pair_data[1] > 0:
+                st.markdown(f"💰 **สินทรัพย์ทำเงิน:** {best_pair_data[0]} (**+{best_pair_data[1]:,.2f} USD**)")
+
+            if worst_pair_data and worst_pair_data[1] < 0:
+                st.markdown(f"⚠️ **สินทรัพย์ที่ควรระวัง:** {worst_pair_data[0]} (**{worst_pair_data[1]:,.2f} USD**)")
+            
+            if pnl_data:
+                st.markdown(f"↕️ **กำไร/ขาดทุน (Long vs Short):** `{pnl_data[0]:,.2f}` vs `{pnl_data[1]:,.2f}`")
+
 
 # =============================================================================            
 
-def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolios_gs=pd.DataFrame()):
+def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, portfolio_to_edit_data={}):
     """
     Renders the form to add or edit a portfolio, with all labels in English.
     """
@@ -232,7 +259,15 @@ def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolio
             form_new_portfolio_name = st.text_input("Portfolio Name*", value=portfolio_to_edit_data.get("PortfolioName", ""), key=f"{key_prefix}_name")
         with form_c2:
             form_new_initial_balance = st.number_input("Initial Balance*", min_value=0.01, value=float(portfolio_to_edit_data.get("InitialBalance", 10000.0)), format="%.2f", key=f"{key_prefix}_balance")
-
+        account_type_options = ["STANDARD", "CENT", "PROP_FIRM"] # เพิ่มตัวเลือกประเภทบัญชี
+        default_account_type = portfolio_to_edit_data.get("AccountType", "STANDARD") # ดึงค่าเดิมถ้าเป็นโหมดแก้ไข
+        account_type_index = account_type_options.index(default_account_type) if default_account_type in account_type_options else 0
+        form_new_account_type = st.selectbox(
+            "Account Type*",
+            options=account_type_options,
+            index=account_type_index,
+            key=f"{key_prefix}_account_type"
+        )
         form_status_options = ["Active", "Inactive", "Pending", "Passed", "Failed"]
         status_default = portfolio_to_edit_data.get("Status", "Active")
         status_index = form_status_options.index(status_default) if status_default in form_status_options else 0
@@ -245,11 +280,20 @@ def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolio
             eval_index = evaluation_step_options.index(eval_default) if eval_default in evaluation_step_options else 0
             form_new_evaluation_step_widget = st.selectbox("Evaluation Step", options=evaluation_step_options, index=eval_index, key=f"{key_prefix}_eval_step")
         
-        prop_profit_target_widget, prop_daily_loss_widget, prop_total_stopout_widget, prop_leverage_widget, prop_min_days_widget = (None,) * 5
-        comp_end_date_widget, comp_profit_target_widget, comp_goal_metric_widget, comp_daily_loss_widget, comp_total_stopout_widget = (None,) * 5
-        pers_overall_profit_widget, pers_weekly_profit_widget, pers_max_dd_overall_widget, pers_target_end_date_widget, pers_daily_profit_widget, pers_max_dd_daily_widget = (None,) * 6
-        scaling_freq_val_widget, su_wr_val_widget, sd_loss_val_widget, min_risk_val_widget, su_gain_val_widget, sd_wr_val_widget, max_risk_val_widget, su_inc_val_widget, sd_dec_val_widget, current_risk_s_val_widget = (None,) * 10
-        
+        # Initialize widget value variables to a default (like 0.0 or None)
+        prop_profit_target_widget, prop_daily_loss_widget, prop_total_stopout_widget, prop_leverage_widget, prop_min_days_widget = (0.0, 0.0, 0.0, 0.0, 0)
+        comp_end_date_widget, comp_profit_target_widget, comp_goal_metric_widget, comp_daily_loss_widget, comp_total_stopout_widget = (None, 0.0, "", 0.0, 0.0)
+        # <<<< แก้ไขตรงนี้: ใช้ safe_float_convert สำหรับค่าเริ่มต้น pers_overall_profit_widget, pers_weekly_profit_widget, pers_max_dd_overall_widget >>>>
+        pers_overall_profit_widget = safe_float_convert(portfolio_to_edit_data.get("OverallProfitTarget"), 0.0)
+        pers_weekly_profit_widget = safe_float_convert(portfolio_to_edit_data.get("WeeklyProfitTarget"), 0.0)
+        pers_max_dd_overall_widget = safe_float_convert(portfolio_to_edit_data.get("MaxAcceptableDrawdownOverall"), 0.0)
+        # <<<< สิ้นสุดการแก้ไข >>>>
+        # <<<< เพิ่มตัวแปรนี้เข้ามา และกำหนดค่าเริ่มต้นให้เหมาะสมกับทุกเงื่อนไข >>>>
+        pers_daily_loss_limit_widget = safe_float_convert(portfolio_to_edit_data.get("DailyLossLimitPercent"), 2.0)
+        # <<<< สิ้นสุดการเพิ่ม >>>>
+
+        scaling_freq_val_widget, su_wr_val_widget, sd_loss_val_widget, min_risk_val_widget, su_gain_val_widget, sd_wr_val_widget, max_risk_val_widget, su_inc_val_widget, sd_dec_val_widget, current_risk_s_val_widget = ("", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
         if selected_program_type in ["Prop Firm Challenge", "Funded Account"]:
             st.markdown("**Prop Firm/Funded Rules:**")
             f_pf1, f_pf2, f_pf3 = st.columns(3)
@@ -264,8 +308,13 @@ def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolio
             st.markdown("**Competition Details:**")
             f_tc1, f_tc2 = st.columns(2)
             with f_tc1:
-                comp_end_date_widget = st.date_input("Competition End Date", value=pd.to_datetime(portfolio_to_edit_data.get("CompetitionEndDate")).date() if pd.notna(portfolio_to_edit_data.get("CompetitionEndDate")) else None, key=f"{key_prefix}_comp_date")
-                comp_profit_target_widget = st.number_input("Profit Target % (Comp)", value=float(portfolio_to_edit_data.get("ProfitTargetPercent", 20.0)), format="%.1f", key=f"{key_prefix}_comp_profit")
+                comp_date_str = portfolio_to_edit_data.get("CompetitionEndDate")
+                default_comp_date = None
+                if comp_date_str and str(comp_date_str).strip() not in ["", "None", "nan"]:
+                    try: default_comp_date = pd.to_datetime(comp_date_str).date()
+                    except (ValueError, TypeError): default_comp_date = None
+                comp_end_date_widget = st.date_input("Competition End Date", value=default_comp_date, key=f"{key_prefix}_comp_date")
+                comp_profit_target_widget = st.number_input("Profit Target % (Comp)", value=float(portfolio_to_edit_data.get("ProfitTargetPercent", 20.0)), format="%.1f", key=f"{key_prefix}_comp_profit")           
             with f_tc2:
                 comp_goal_metric_widget = st.text_input("Goal Metric (Comp)", value=portfolio_to_edit_data.get("GoalMetric", ""), help="e.g. %Gain, ROI", key=f"{key_prefix}_comp_goal")
                 comp_daily_loss_widget = st.number_input("Daily Loss Limit % (Comp)", value=float(portfolio_to_edit_data.get("DailyLossLimitPercent", 5.0)), format="%.1f", key=f"{key_prefix}_comp_daily_loss")
@@ -275,20 +324,33 @@ def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolio
             st.markdown("**Personal Goals (Optional):**")
             f_ps1, f_ps2 = st.columns(2)
             with f_ps1:
-                pers_overall_profit_widget = st.number_input("Overall Profit Target ($)", value=float(portfolio_to_edit_data.get("OverallProfitTarget", 0.0)), format="%.2f", key=f"{key_prefix}_pers_profit")
-                pers_weekly_profit_widget = st.number_input("Weekly Profit Target ($)", value=float(portfolio_to_edit_data.get("WeeklyProfitTarget", 0.0)), format="%.2f", key=f"{key_prefix}_pers_weekly_profit")
-                pers_max_dd_overall_widget = st.number_input("Max. Acceptable Overall DD ($)", value=float(portfolio_to_edit_data.get("MaxAcceptableDrawdownOverall", 0.0)), format="%.2f", key=f"{key_prefix}_pers_dd_overall")
+                pers_overall_profit_widget = st.number_input("Overall Profit Target ($)", value=safe_float_convert(portfolio_to_edit_data.get("OverallProfitTarget"), 0.0), format="%.2f", key=f"{key_prefix}_pers_profit")
+                pers_weekly_profit_widget = st.number_input("Weekly Profit Target ($)", value=safe_float_convert(portfolio_to_edit_data.get("WeeklyProfitTarget"), 0.0), format="%.2f", key=f"{key_prefix}_pers_weekly_profit")
+                pers_max_dd_overall_widget = st.number_input("Max. Acceptable Overall DD ($)", value=safe_float_convert(portfolio_to_edit_data.get("MaxAcceptableDrawdownOverall"), 0.0), format="%.2f", key=f"{key_prefix}_pers_dd_overall")
             with f_ps2:
-                pers_target_end_date_widget = st.date_input("Target End Date", value=pd.to_datetime(portfolio_to_edit_data.get("TargetEndDate")).date() if pd.notna(portfolio_to_edit_data.get("TargetEndDate")) else None, key=f"{key_prefix}_pers_end_date")
-                pers_daily_profit_widget = st.number_input("Daily Profit Target ($)", value=float(portfolio_to_edit_data.get("DailyProfitTarget", 0.0)), format="%.2f", key=f"{key_prefix}_pers_daily_profit")
-                pers_max_dd_daily_widget = st.number_input("Max. Acceptable Daily DD ($)", value=float(portfolio_to_edit_data.get("MaxAcceptableDrawdownDaily", 0.0)), format="%.2f", key=f"{key_prefix}_pers_dd_daily")
+                target_date_str = portfolio_to_edit_data.get("TargetEndDate")
+                default_target_date = None
+                if target_date_str and str(target_date_str).strip() not in ["", "None", "nan"]:
+                    try: default_target_date = pd.to_datetime(target_date_str).date()
+                    except (ValueError, TypeError): default_target_date = None
+                pers_target_end_date_widget = st.date_input("Target End Date", value=default_target_date, key=f"{key_prefix}_pers_end_date")
+                pers_daily_profit_widget = st.number_input("Daily Profit Target ($)", value=safe_float_convert(portfolio_to_edit_data.get("DailyProfitTarget"), 0.0), format="%.2f", key=f"{key_prefix}_pers_daily_profit")
+                
+                # <<<< เพิ่มบรรทัดนี้เข้ามาใน Personal Account >>>>
+                pers_daily_loss_limit_widget = st.number_input(
+                    "Daily Drawdown Limit (%)",
+                    min_value=0.1, max_value=100.0,
+                    value=safe_float_convert(portfolio_to_edit_data.get("DailyLossLimitPercent"), 2.0), # ใช้ safe_float_convert ตรงนี้
+                    step=0.1, format="%.1f",
+                    key=f"{key_prefix}_pers_daily_dd_limit"
+                )
+                # <<<< สิ้นสุดการเพิ่ม >>>>
+
 
         st.markdown("**Scaling Manager Settings (Optional):**")
         enable_scaling_checkbox_val = st.checkbox("Enable Scaling Manager?", value=str(portfolio_to_edit_data.get("EnableScaling", "False")).upper() == 'TRUE', key=f"{key_prefix}_scaling_cb")
 
-        if enable_scaling_checkbox_val:
-            # ... (labels inside scaling manager are mostly English already) ...
-            pass
+        # You would add the scaling manager inputs here if enabled
         
         notes_val_area_widget = st.text_area("Additional Notes", value=portfolio_to_edit_data.get("Notes", ""), key=f"{key_prefix}_notes")
 
@@ -296,11 +358,9 @@ def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolio
         submitted = st.form_submit_button(submit_button_label)
 
         if submitted:
-            # --- VVVV START: โค้ดที่แก้ไขและแปลแล้ว VVVV ---
             if not form_new_portfolio_name or not selected_program_type or not form_new_status or form_new_initial_balance <= 0:
                 st.warning("Please fill in all required fields (*) correctly.")
             else:
-                # Data preparation logic remains the same
                 data_to_save = portfolio_logic.prepare_new_portfolio_data_for_gsheet(
                     form_new_portfolio_name_in_form=form_new_portfolio_name,
                     selected_program_type_to_use_in_form=selected_program_type,
@@ -309,7 +369,16 @@ def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolio
                     form_new_evaluation_step_val_in_form=form_new_evaluation_step_widget,
                     form_notes_val=notes_val_area_widget,
                     form_profit_target_val=prop_profit_target_widget,
-                    form_daily_loss_val=prop_daily_loss_widget,
+                    # <<<< แก้ไขตรงนี้: ส่งค่า DailyLossLimitPercent ที่ถูกต้องตาม ProgramType >>>>
+                    # ถ้าเป็น Prop Firm/Funded ให้ใช้ prop_daily_loss_widget
+                    # ถ้าเป็น Competition ให้ใช้ comp_daily_loss_widget
+                    # ถ้าเป็น Personal Account ให้ใช้ pers_daily_loss_limit_widget (ที่เราเพิ่งเพิ่ม)
+                    # ถ้าไม่ใช่ ProgramType ข้างบน ให้เป็น 0.0 (หรือค่า default อื่นๆ)
+                    form_daily_loss_val=prop_daily_loss_widget if selected_program_type in ["Prop Firm Challenge", "Funded Account"] else \
+                                        comp_daily_loss_widget if selected_program_type == "Trading Competition" else \
+                                        pers_daily_loss_limit_widget if selected_program_type == "Personal Account" else \
+                                        0.0,
+                    # <<<< สิ้นสุดการแก้ไข >>>>
                     form_total_stopout_val=prop_total_stopout_widget,
                     form_leverage_val=prop_leverage_widget,
                     form_min_days_val=prop_min_days_widget,
@@ -323,7 +392,7 @@ def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolio
                     form_pers_weekly_profit_val=pers_weekly_profit_widget,
                     form_pers_daily_profit_val=pers_daily_profit_widget,
                     form_pers_max_dd_overall_val=pers_max_dd_overall_widget,
-                    form_pers_max_dd_daily_val=pers_max_dd_daily_widget,
+                    form_pers_max_dd_daily_val=0.0, # <<<< บรรทัดนี้ถูกต้องแล้ว (เป็น 0.0 เพราะเราส่งค่า DailyLossLimitPercent แยกไปแล้ว)
                     form_enable_scaling_checkbox_val=enable_scaling_checkbox_val,
                     form_scaling_freq_val=scaling_freq_val_widget,
                     form_su_wr_val=su_wr_val_widget,
@@ -334,7 +403,8 @@ def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolio
                     form_sd_dec_val=sd_dec_val_widget,
                     form_min_risk_val=min_risk_val_widget,
                     form_max_risk_val=max_risk_val_widget,
-                    form_current_risk_val=current_risk_s_val_widget
+                    form_current_risk_val=current_risk_s_val_widget,
+                    account_type_in_form=form_new_account_type
                 )
 
                 if is_edit_mode:
@@ -343,28 +413,23 @@ def _render_portfolio_form(is_edit_mode, portfolio_to_edit_data={}, df_portfolio
                     data_to_save["CreationDate"] = portfolio_to_edit_data.get("CreationDate", date.today().strftime('%Y-%m-%d %H:%M:%S'))
                     
                     with st.spinner("Updating..."): 
-                        success = gs_handler.update_portfolio_in_gsheets(portfolio_id_to_update, data_to_save)
-                    
-                    if success:
-                        st.success(f"Successfully updated portfolio '{form_new_portfolio_name}'!")
-                    else: 
-                        st.error("Failed to update the portfolio.")
-                else: # This is for adding a new portfolio
+                        success, msg = gs_handler_instance.update_portfolio_in_gsheets(portfolio_id_to_update, data_to_save)
+                    if success: st.success(msg)
+                    else: st.error(msg)
+                else:
                     if not df_portfolios_gs.empty and form_new_portfolio_name in df_portfolios_gs['PortfolioName'].astype(str).values:
-                        st.error(f"Portfolio name '{form_new_portfolio_name}' already exists. Please use a different name.")
+                        st.error(f"Portfolio name '{form_new_portfolio_name}' already exists.")
                     else:
                         with st.spinner("Saving..."): 
-                            success_save = gs_handler.save_new_portfolio_to_gsheets(data_to_save)
-                        
+                            success_save, msg_save = gs_handler_instance.save_new_portfolio_to_gsheets(data_to_save)
                         if success_save:
-                            st.success(f"Successfully added portfolio '{form_new_portfolio_name}'!")
+                            st.success(msg_save)
                             if session_key_program_type in st.session_state:
                                 del st.session_state[session_key_program_type]
-                        else: 
-                            st.error("An error occurred while saving the new portfolio.")
+                        else: st.error(msg_save)
 
 
-def render_portfolio_manager_expander(df_portfolios):
+def render_portfolio_manager_expander(gs_handler_instance, df_portfolios):
     """
     Renders the main expander and tabs for portfolio management.
     """
@@ -373,9 +438,39 @@ def render_portfolio_manager_expander(df_portfolios):
         tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "➕ Add New Portfolio", "✏️ Edit/Delete Portfolio"])
 
         with tab1:
+            # ===================================================================
+            # ===== START: โค้ดส่วนแก้ไขที่เพิ่มเข้ามา =====
+            # ===================================================================
             df_actual_trades = gs_handler.load_actual_trades_from_gsheets()
             df_summaries = gs_handler.load_statement_summaries_from_gsheets()
             active_portfolio_id = st.session_state.get('active_portfolio_id_gs')
+
+            if active_portfolio_id:
+                (
+                    df_equity_curve_data,
+                    realized_net_profit,
+                    total_deposit,
+                    total_withdrawal,
+                    total_net_profit_from_sheet
+                ) = analytics_engine.calculate_true_equity_curve(
+                    df_summaries=df_summaries,
+                    portfolio_id=active_portfolio_id
+                )
+                st.session_state['df_equity_curve_data'] = df_equity_curve_data
+                st.session_state['realized_profit_loss'] = realized_net_profit
+                st.session_state['total_deposit_amount'] = total_deposit
+                st.session_state['total_withdrawal_amount'] = total_withdrawal
+                st.session_state['total_net_profit_from_sheet'] = total_net_profit_from_sheet
+            else:
+                st.session_state['df_equity_curve_data'] = None
+                st.session_state['realized_profit_loss'] = None
+                st.session_state['total_deposit_amount'] = None
+                st.session_state['total_withdrawal_amount'] = None
+                st.session_state['total_net_profit_from_sheet'] = None
+            
+            # ===================================================================
+            # ===== END: สิ้นสุดโค้ดที่แก้ไข =====
+            # ===================================================================
 
             if active_portfolio_id and not df_portfolios.empty:
                 details_df = df_portfolios[df_portfolios['PortfolioID'] == active_portfolio_id]
@@ -392,16 +487,44 @@ def render_portfolio_manager_expander(df_portfolios):
 
         with tab2:
             st.subheader("➕ Add New Portfolio")
-            _render_portfolio_form(is_edit_mode=False, df_portfolios_gs=df_portfolios)
+            _render_portfolio_form(
+                is_edit_mode=False,
+                gs_handler_instance=gs_handler_instance,
+                df_portfolios_gs=df_portfolios
+            )
 
         with tab3:
             st.subheader("✏️ Edit/Delete Portfolio")
             if df_portfolios.empty: 
-                st.info("No portfolios to edit yet.")
+                st.info("No portfolios to edit or delete yet.")
             else:
                 edit_dict = dict(zip(df_portfolios['PortfolioName'], df_portfolios['PortfolioID']))
-                name_to_edit = st.selectbox("Select portfolio to edit:", options=[""] + list(edit_dict.keys()), key="edit_sel")
-                if name_to_edit:
-                    id_to_edit = edit_dict[name_to_edit]
-                    data_to_edit = df_portfolios[df_portfolios['PortfolioID'] == id_to_edit].iloc[0].to_dict()
-                    _render_portfolio_form(is_edit_mode=True, portfolio_to_edit_data=data_to_edit, df_portfolios_gs=df_portfolios)
+                name_to_action = st.selectbox(
+                    "Select portfolio to Edit or Delete:", 
+                    options=[""] + list(edit_dict.keys()), 
+                    key="action_sel"
+                )
+                
+                if name_to_action:
+                    portfolio_id = edit_dict[name_to_action]
+                    data_to_action = df_portfolios[df_portfolios['PortfolioID'] == portfolio_id].iloc[0].to_dict()
+
+                    st.markdown(f"### ✏️ Edit Details for '{name_to_action}'")
+                    _render_portfolio_form(
+                        is_edit_mode=True,
+                        gs_handler_instance=gs_handler_instance,
+                        portfolio_to_edit_data=data_to_action, 
+                        df_portfolios_gs=df_portfolios
+                    )
+                    st.markdown("---")                    
+                    st.error(f"Danger Zone: Delete '{name_to_action}'")
+                    
+                    confirm_delete = st.checkbox(f"I understand and want to delete '{name_to_action}'", key=f"del_confirm_{portfolio_id}")
+                    
+                    if st.button(f"Confirm Deletion", type="primary", disabled=not confirm_delete):
+                        success, msg = gs_handler_instance.delete_portfolio_from_gsheets(portfolio_id)
+                        if success:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)

@@ -45,7 +45,8 @@ WORKSHEET_HEADERS = {
         'ScaleUp_MinGainPercent', 'ScaleUp_RiskIncrementPercent', 'ScaleDown_MaxLossPercent',
         'ScaleDown_LowWinRate', 'ScaleDown_RiskDecrementPercent', 'MinRiskPercentAllowed',
         'MaxRiskPercentAllowed', 'CurrentRiskPercent',
-        'AccountID' # <--- เพิ่มคอลัมน์ AccountID ตรงนี้
+        'AccountID',# <--- เพิ่มคอลัมน์ AccountID ตรงนี้
+        'AccountType'
     ],
 
     # ใช้โครงสร้างที่ถูกต้องสำหรับ PlannedTradeLogs (เหลือแค่ครั้งเดียว)
@@ -155,4 +156,61 @@ EXPECTED_CLEANED_COLUMNS_STATEMENT_PARSING = {
         "Price_Deal", "Order_ID_Deal", "Commission_Deal", "Fee_Deal", "Swap_Deal",
         "Profit_Deal", "Balance_Deal", "Comment_Deal"
     ]
+}
+
+ASSET_SPECIFICATIONS = {
+    "STANDARD": { # Symbol สำหรับบัญชี STANDARD
+        "XAUUSD": { # จาก Screenshot MT5 (14.30.22.png) ของ Standard Account
+            "tick_size": 0.01,
+            "tick_value_per_tick_per_lot": 1.5427 # ค่านี้เพื่อให้ Lot ตรง 0.02 ที่ Risk 1% (ตามปัญหาที่คุณเจอ)
+        },
+        "EURUSD": { # จาก Screenshot MT5 (14.31.05.png)
+            "tick_size": 0.00001,
+            "tick_value_per_tick_per_lot": 1.00
+        },
+        "USDJPY": { # จาก Screenshot MT5 (14.31.58.png)
+            "tick_size": 0.001,
+            "tick_value_per_tick_per_lot": 1.00
+        },
+        "GBPUSD": { # จาก Screenshot MT5 (15.42.04.png)
+            "tick_size": 0.00001,
+            "tick_value_per_tick_per_lot": 1.00
+        },
+        "NAS100": { # จาก Screenshot MT5 (15.42.45.png)
+            "tick_size": 0.01, # ประเมินจาก Digits 2
+            "tick_value_per_tick_per_lot": 1.00 # ประเมิน
+        },
+        "US30": { # จาก Screenshot MT5 (15.42.53.png)
+            "tick_size": 0.01, # ประเมินจาก Digits 2
+            "tick_value_per_tick_per_lot": 1.00 # ประเมิน
+        },
+        "SP500": { # จาก Screenshot MT5 (15.42.38.png)
+            "tick_size": 0.01, # ประเมินจาก Digits 2
+            "tick_value_per_tick_per_lot": 1.00 # ประเมิน
+        },
+        "JPN225": { # จาก Screenshot MT5 (15.43.01.png)
+            "tick_size": 0.01, # ประเมินจาก Digits 2
+            "tick_value_per_tick_per_lot": 1.00 # ประเมิน
+        },
+        "BTCUSD": { # จาก Screenshot MT5 (15.43.10.png)
+            "tick_size": 0.01, # ประเมินจาก Digits 2
+            "tick_value_per_tick_per_lot": 1.00 # ประเมิน
+        },
+        # ... (เพิ่ม Symbol มาตรฐานอื่นๆ ที่คุณใช้)
+    },
+    "CENT": { # Symbol สำหรับบัญชี CENT
+        "XAUUSDc": { # จาก Screenshot 2025-07-06 at 15.39.08.png
+            "tick_size": 0.01, # (ค่าทั่วไปสำหรับทองคำ)
+            "tick_value_per_tick_per_lot": 0.01 # 1 Tick (0.01 price move) = 0.01 USD for 1 Lot (1 XAU)
+        },
+        "USDJPYc": { # จาก Screenshot 2025-07-06 at 15.37.13.png
+            "tick_size": 0.001, # (ค่าทั่วไปสำหรับ 3 Digits)
+            "tick_value_per_tick_per_lot": 0.01 # 1 Tick (0.001 price move) = 0.01 USD for 1 Lot (1000 USD)
+        },
+        "BTCUSDc": { # จาก Screenshot 2025-07-06 at 15.38.13.png
+            "tick_size": 0.01, # (ค่าทั่วไปสำหรับ 2 Digits)
+            "tick_value_per_tick_per_lot": 0.01 # 1 Tick (0.01 price move) = 0.01 USD for 1 Lot (0.01 BTC)
+        },
+        # ... (เพิ่ม Symbol Cent Account อื่นๆ ที่คุณใช้)
+    }
 }

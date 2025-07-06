@@ -440,53 +440,67 @@ def generate_weekly_summary(df_all_actual_trades: pd.DataFrame, active_portfolio
     # 1. กรองข้อมูลเฉพาะพอร์ตที่เลือก
     df = df_all_actual_trades[df_all_actual_trades['PortfolioID'] == active_portfolio_id].copy()
 
-    # 2. เปลี่ยนชื่อคอลัมน์ 'Symbol_Deal' เป็น 'Symbol' เพื่อให้เป็นมาตรฐาน
+    # --- จุดที่แก้ไขและจัดระเบียบ ---
+    # 2. ตรวจสอบและแปลงประเภทข้อมูล (Data Cleaning) ให้เรียบร้อยก่อนใช้งาน
+    
+    # บังคับให้ Time_Deal เป็น datetime และลบแถวที่แปลงไม่ได้ทิ้ง
+    if 'Time_Deal' in df.columns:
+        df['Time_Deal'] = pd.to_datetime(df['Time_Deal'], errors='coerce')
+        df.dropna(subset=['Time_Deal'], inplace=True)
+    else:
+        # ถ้าไม่มีคอลัมน์เวลา ก็ไม่สามารถวิเคราะห์รายสัปดาห์ได้
+        return None
+
+    # บังคับให้ Profit_Deal เป็นตัวเลข (จากครั้งก่อน)
+    if 'Profit_Deal' in df.columns:
+        df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
+    else:
+        # ถ้าไม่มีคอลัมน์กำไร ก็ไม่สามารถคำนวณได้
+        return None
+
+    # เปลี่ยนชื่อคอลัมน์ Symbol (ทำครั้งเดียว)
     if 'Symbol_Deal' in df.columns:
         df.rename(columns={'Symbol_Deal': 'Symbol'}, inplace=True)
-    
-    # 3. เตรียมข้อมูลสำหรับการวิเคราะห์
-    df['Time_Deal'] = pd.to_datetime(df['Time_Deal'], errors='coerce')
-    df.dropna(subset=['Time_Deal', 'Profit_Deal'], inplace=True)
+    # --- สิ้นสุดจุดที่แก้ไข ---
 
+    # 3. กรองข้อมูลเฉพาะสัปดาห์ล่าสุด
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)
     
     week_df = df[df['Time_Deal'] >= start_date]
 
+    # ถ้ามีข้อมูลน้อยกว่า 3 เทรดในสัปดาห์ ก็ยังไม่สรุปผล
     if week_df.empty or len(week_df) < 3:
         return None
 
-    # 4. คำนวณ Metrics ที่สำคัญ
+    # 4. คำนวณ Metrics ที่สำคัญ (เหมือนเดิม)
     net_profit = week_df['Profit_Deal'].sum()
     total_trades = len(week_df)
     win_trades = len(week_df[week_df['Profit_Deal'] > 0])
     win_rate = (win_trades / total_trades) * 100 if total_trades > 0 else 0
 
-    # 5. หาข้อมูลเชิงลึก
+    # 5. หาข้อมูลเชิงลึก (เหมือนเดิม)
     week_df['Weekday'] = week_df['Time_Deal'].dt.day_name()
     daily_pnl = week_df.groupby('Weekday')['Profit_Deal'].sum()
-    best_day = daily_pnl.idxmax()
-    worst_day = daily_pnl.idxmin()
+    
+    # 6. สร้างข้อความสรุป (ปรับปรุงให้ปลอดภัยขึ้น)
+    summary_lines = []
+    summary_lines.append(f"ภาพรวมสัปดาห์ที่ผ่านมา: กำไรสุทธิ {net_profit:,.2f} USD, Win Rate {win_rate:.1f}%.")
+    
+    if not daily_pnl.empty:
+        best_day = daily_pnl.idxmax()
+        worst_day = daily_pnl.idxmin()
+        if daily_pnl.get(best_day, 0) > 0:
+            summary_lines.append(f"🗓️ วันที่ดีที่สุดคือวัน **{best_day}** (กำไร {daily_pnl[best_day]:,.2f} USD).")
+        if daily_pnl.get(worst_day, 0) < 0:
+            summary_lines.append(f"📉 วันที่ควรระวังคือวัน **{worst_day}** (ขาดทุน {daily_pnl[worst_day]:,.2f} USD).")
 
     best_Symbol = None
-    # ตรวจสอบก่อนว่ามีคอลัมน์ 'Symbol' จริงๆ ก่อนจะเรียกใช้
     if 'Symbol' in week_df.columns:
         Symbol_pnl = week_df.groupby('Symbol')['Profit_Deal'].sum()
         if not Symbol_pnl.empty and Symbol_pnl.max() > 0:
             best_Symbol = Symbol_pnl.idxmax()
-    
-    # 6. สร้างข้อความสรุป
-    summary_lines = []
-    summary_lines.append(f"ภาพรวมสัปดาห์ที่ผ่านมา: กำไรสุทธิ {net_profit:,.2f} USD, Win Rate {win_rate:.1f}%.")
-    
-    if daily_pnl[best_day] > 0:
-        summary_lines.append(f"🗓️ วันที่ดีที่สุดคือวัน **{best_day}** (กำไร {daily_pnl[best_day]:,.2f} USD).")
-    
-    if daily_pnl[worst_day] < 0:
-        summary_lines.append(f"📉 วันที่ควรระวังคือวัน **{worst_day}** (ขาดทุน {daily_pnl[worst_day]:,.2f} USD).")
-
-    if best_Symbol:
-        summary_lines.append(f"💰 สินทรัพย์ที่ทำกำไรสูงสุดคือ **{best_Symbol}**.")
+            summary_lines.append(f"💰 สินทรัพย์ที่ทำกำไรสูงสุดคือ **{best_Symbol}**.")
 
     return " ".join(summary_lines)
 
@@ -847,43 +861,50 @@ def calculate_true_equity_curve(df_summaries: pd.DataFrame, portfolio_id: str):
     คำนวณ True Equity Curve, Realized Net Profit, Total Deposit, Total Withdrawal
     จาก DataFrame สรุป Statement.
     """
+    # ---- START: การแก้ไขที่สำคัญที่สุด ----
+    # 1. ตรวจสอบก่อนว่า df_summaries มีข้อมูลและคอลัมน์ PortfolioID หรือไม่
+    #    นี่คือการป้องกันข้อผิดพลาด KeyError เมื่อชีตว่าง
+    if df_summaries is None or df_summaries.empty or 'PortfolioID' not in df_summaries.columns:
+        # ถ้าไม่มีข้อมูล ให้คืนค่าเริ่มต้นทั้งหมดทันที เพื่อไม่ให้แอปแครช
+        return pd.DataFrame(), 0.0, 0.0, 0.0, 0.0
+    
+    # 2. บังคับให้คอลัมน์ PortfolioID เป็นประเภท string เพื่อป้องกันปัญหา Data Type
+    df_summaries['PortfolioID'] = df_summaries['PortfolioID'].astype(str)
+    # ---- END: การแก้ไขที่สำคัญที่สุด ----
+
     # กรองข้อมูลสำหรับ Portfolio ที่เลือกและเรียงตาม Timestamp
-    df_filtered = df_summaries[df_summaries['PortfolioID'] == portfolio_id].sort_values(by='Timestamp').copy()
+    df_filtered = df_summaries[df_summaries['PortfolioID'] == str(portfolio_id)].sort_values(by='Timestamp').copy()
 
     if df_filtered.empty:
-        return pd.DataFrame(), 0.0, 0.0, 0.0, 0.0 # คืนค่าเริ่มต้นที่เหมาะสม
+        return pd.DataFrame(), 0.0, 0.0, 0.0, 0.0
 
     # --- ตรวจสอบและแปลงประเภทข้อมูล ---
     numeric_cols = ['Balance', 'Deposit', 'Withdrawal', 'Total_Net_Profit', 'Equity']
     for col in numeric_cols:
         if col not in df_filtered.columns:
             df_filtered[col] = 0.0
+        else:
+            # ทำความสะอาดข้อมูลก่อนแปลงค่า
+            df_filtered[col] = pd.to_numeric(
+                df_filtered[col].astype(str).str.replace(',', '').str.replace(' ', ''), 
+                errors='coerce'
+            ).fillna(0)
 
-    # มั่นใจว่าเป็น numeric
-    df_filtered['Balance'] = pd.to_numeric(df_filtered['Balance'], errors='coerce').fillna(0)
-    df_filtered['Deposit'] = pd.to_numeric(df_filtered['Deposit'], errors='coerce').fillna(0)
-    df_filtered['Withdrawal'] = pd.to_numeric(df_filtered['Withdrawal'], errors='coerce').fillna(0)
-    df_filtered['Total_Net_Profit'] = pd.to_numeric(df_filtered['Total_Net_Profit'], errors='coerce').fillna(0)
-    df_filtered['Equity'] = pd.to_numeric(df_filtered['Equity'], errors='coerce').fillna(0)
+    df_filtered['Timestamp'] = pd.to_datetime(df_filtered['Timestamp'], errors='coerce')
+    df_filtered.dropna(subset=['Timestamp'], inplace=True)
 
+    if df_filtered.empty:
+        return pd.DataFrame(), 0.0, 0.0, 0.0, 0.0
 
     # --- คำนวณ Metrics ที่ต้องการ ---
     df_filtered['Equity For Chart'] = df_filtered['Balance']
-
     total_deposit = df_filtered['Deposit'].sum()
     total_withdrawal = df_filtered['Withdrawal'].sum()
-
     initial_balance = df_filtered['Balance'].iloc[0] if not df_filtered.empty else 0
     final_balance = df_filtered['Balance'].iloc[-1] if not df_filtered.empty else 0
-
     realized_net_profit = final_balance - initial_balance + total_withdrawal - total_deposit
     
-    # --- VVVV START EDIT (โค้ดที่แก้ไข) VVVV ---
-    # เปลี่ยนจากการ .sum() เป็นการเลือกค่าจากแถวสุดท้าย (.iloc[-1]) ของข้อมูลที่เรียงตามเวลาแล้ว
-    if not df_filtered.empty:
-        total_net_profit_from_sheet = df_filtered['Total_Net_Profit'].iloc[-1]
-    else:
-        total_net_profit_from_sheet = 0.0
-    # --- ^^^^ END EDIT ^^^^ ---
+    # แก้ไขการพิมพ์ผิดจาก "sh" เป็น "sheet"
+    total_net_profit_from_sheet = df_filtered['Total_Net_Profit'].iloc[-1] if not df_filtered.empty else 0.0
 
     return df_filtered, realized_net_profit, total_deposit, total_withdrawal, total_net_profit_from_sheet
