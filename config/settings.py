@@ -1,4 +1,6 @@
 # config/settings.py (เวอร์ชันจัดระเบียบใหม่และแก้ไขสมบูรณ์)
+import os  
+from dotenv import load_dotenv
 """
 Central configuration file for the Ultimate Chart Trade Planner.
 """

@@ -27,3 +27,7 @@ scaling.py
 
 # Ignore history files
 .history/
+
+.env
+venv/
+venv_old_py/
