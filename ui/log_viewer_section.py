@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 
 # Import functions from other modules
-from core import gs_handler # To load all planned trade logs
+from core import supabase_handler as db_handler
 
 @st.cache_data(ttl=120) # Cache ผลลัพธ์ของฟังก์ชันนี้ (ซึ่งรวมการเรียงข้อมูลแล้ว) ไว้ 2 นาที
 def load_and_sort_planned_trades_for_viewer():
@@ -11,7 +11,7 @@ def load_and_sort_planned_trades_for_viewer():
     Loads planned trade logs using gs_handler and sorts them by Timestamp.
     This function is specific to the log viewer's needs.
     """
-    df_logs_viewer = gs_handler.load_all_planned_trade_logs_from_gsheets()
+    df_logs_viewer = db_handler.load_all_planned_trade_logs()
 
     if df_logs_viewer.empty:
         return pd.DataFrame()
@@ -27,17 +27,19 @@ def load_and_sort_planned_trades_for_viewer():
     return df_logs_viewer
 
 def render_log_viewer_section():
+    df_logs_viewer = db_handler.load_all_planned_trade_logs()
     """
     Renders the Trade Log Viewer section in the main area.
     Corresponds to SEC 7 of main (1).py.
     """
     with st.expander("📚 Trade Log Viewer (แผนเทรดจาก Google Sheets)", expanded=False):
-        df_log_viewer_gs_sorted = load_and_sort_planned_trades_for_viewer()
+        df_all_logs = db_handler.load_all_planned_trade_logs()
 
-        if df_log_viewer_gs_sorted.empty:
-            st.info("ยังไม่มีข้อมูลแผนที่บันทึกไว้ใน Google Sheets หรือ Worksheet 'PlannedTradeLogs' ว่างเปล่า/โหลดไม่สำเร็จ.")
+        if df_logs_viewer.empty:   
+            st.info("ยังไม่มีข้อมูลแผนที่บันทึกไว้ใน Supabase.")
         else:
-            df_show_log_viewer = df_log_viewer_gs_sorted.copy() # Work on a copy for filtering
+            df_logs_viewer_sorted = df_logs_viewer.sort_values(by="Timestamp", ascending=False)
+            df_show_log_viewer = df_logs_viewer_sorted.copy()
 
             # --- Filters UI ---
             log_filter_cols = st.columns(4)

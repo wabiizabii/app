@@ -4,7 +4,7 @@ import pandas as pd
 
 # Import functions and settings from other modules
 from config import settings
-from core import gs_handler
+from core import supabase_handler as db_handler
 from core import analytics_engine
 
 def render_ai_section():
@@ -36,10 +36,10 @@ def render_ai_section():
         with tab1:
             st.markdown("### 📝 AI Intelligence Report (จากแผนเทรด)")
             try:
-                df_ai_planned_logs_all = gs_handler.load_all_planned_trade_logs_from_gsheets()
+                df_ai_planned_logs = db_handler.load_all_planned_trade_logs()
                 
                 planned_analysis_results = analytics_engine.analyze_planned_trades_for_ai(
-                    df_all_planned_logs=df_ai_planned_logs_all,
+                    df_all_planned_logs=db_handler.load_all_planned_trade_logs(),
                     active_portfolio_id=active_portfolio_id_for_ai,
                     active_portfolio_name=active_portfolio_name_for_ai,
                     balance_for_simulation=balance_for_ai_simulation
@@ -71,8 +71,8 @@ def render_ai_section():
         with tab2:
             st.subheader("Dashboard วิเคราะห์ผลการเทรดจริง")
             try:
-                df_ai_actual_trades_all = gs_handler.load_actual_trades_from_gsheets()
-                df_all_statement_summaries = gs_handler.load_statement_summaries_from_gsheets()
+                df_ai_actual_trades_all = db_handler.load_actual_trades()
+                df_all_statement_summaries = db_handler.load_statement_summaries()
                 dashboard_results = analytics_engine.get_dashboard_analytics_for_actual(
                     df_all_actual_trades=df_ai_actual_trades_all,
                     df_all_statement_summaries=df_all_statement_summaries,
@@ -104,15 +104,16 @@ def render_ai_section():
             st.write("คลิกปุ่มด้านล่างเพื่อให้ AI เริ่มทำการวิเคราะห์ข้อมูลเชิงลึก")
             if st.button("🚀 เริ่มการวิเคราะห์เชิงลึก!"):
                 try:
-                    df_planned = gs_handler.load_all_planned_trade_logs_from_gsheets()
-                    df_actual = gs_handler.load_actual_trades_from_gsheets()
-                    if df_planned.empty or df_actual.empty:
+                    df_planned_logs = db_handler.load_all_planned_trade_logs()
+                    df_actual_trades = db_handler.load_actual_trades()
+
+                    if df_ai_planned_logs.empty or df_ai_actual_trades.empty:
                         st.warning("ไม่พบข้อมูล 'แผนการเทรด' หรือ 'ผลการเทรดจริง'")
                     else:
                         with st.spinner("AI กำลังประมวลผล..."):
                             combined_results = analytics_engine.analyze_combined_trades_for_ai(
-                                df_planned=df_planned,
-                                df_actual=df_actual,
+                                df_planned=df_ai_planned_logs,
+                                df_actual=df_ai_actual_trades,
                                 active_portfolio_id=active_portfolio_id_for_ai,
                                 active_portfolio_name=active_portfolio_name_for_ai
                             )

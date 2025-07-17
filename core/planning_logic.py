@@ -12,7 +12,9 @@ def calculate_fibo_trade_plan(
     fibo_flags_selected: list,
     direction: str,
     current_active_balance: float,
-    spread_str: str
+    spread_str: str,
+    asset_name: str,
+    account_type: str
 ):
     # --- START OF FIX: Initialize all returnable variables at the top ---
     # การกำหนดค่าเริ่มต้นทั้งหมดไว้ที่นี่ จะช่วยป้องกัน UnboundLocalError ได้ 100%
