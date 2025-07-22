@@ -3,7 +3,9 @@ from config import settings
 import streamlit as st
 import pandas as pd
 import numpy as np
-from core import gs_handler, planning_logic, analytics_engine
+from core import supabase_handler as db_handler
+from core import planning_logic, analytics_engine
+
 
 def safe_float_convert(value, default=0.0):
     """Safely converts a value to a float, handling None, empty strings, or text."""
@@ -24,21 +26,21 @@ def get_cached_strengths(df_actual, portfolio_id):
         return []
     return analytics_engine.find_user_strengths(df_all_actual_trades=df_actual, active_portfolio_id=portfolio_id)
 
-def render_sidebar():
+def render_sidebar(df_portfolios: pd.DataFrame, user_id: str): # <<< แก้ไข: เพิ่ม user_id
     """
     Renders the entire Sidebar.
     """
    
     
     with st.sidebar:
-        df_portfolios = gs_handler.load_portfolios_from_gsheets()
+        # แก้ไข: ส่ง user_id เข้าไปในการโหลด portfolios
+        df_portfolios = db_handler.load_portfolios(user_id=user_id)
         st.markdown("---")
         st.subheader("Active Portfolio")
 
         if df_portfolios is None or df_portfolios.empty:
             st.warning("⚠️ ไม่พบข้อมูล Portfolio ใน Google Sheet. กรุณาเพิ่ม Portfolio ใหม่ หรือตรวจสอบชื่อชีท 'Portfolios'.")
             st.session_state['active_portfolio_id_gs'] = None # Clear active id if no portfolios found
-            return
             return
 
         portfolio_options = dict(zip(df_portfolios['PortfolioName'], df_portfolios['PortfolioID']))
@@ -107,7 +109,8 @@ def render_sidebar():
 
         user_strengths = []
         if active_id:
-            df_actual_trades = gs_handler.load_actual_trades_from_gsheets()
+            # แก้ไข: ส่ง user_id เข้าไปในการโหลด actual trades
+            df_actual_trades = db_handler.load_actual_trades(user_id=user_id)
             user_strengths = get_cached_strengths(df_actual_trades, active_id)
         
         st.markdown("---")
@@ -306,8 +309,8 @@ def render_sidebar():
                         risk_pct_custom_input=risk_to_use,
                         custom_entries_details=custom_entries,
                         current_active_balance=active_balance_to_use,
-                        asset_name=asset_custom, # Symbol (เป็นตัวพิมพ์ใหญ่แล้ว)
-                        account_type=active_account_type # AccountType ของพอร์ตที่เลือก
+                        # asset_name=asset_custom, # ไม่จำเป็นต้องส่ง asset_name และ account_type ไปที่ calculate_custom_trade_plan
+                        # account_type=active_account_type
                     )
         
         st.session_state.planning_result = planning_result
@@ -318,7 +321,8 @@ def render_sidebar():
 
         st.markdown("---")
         st.subheader("💾 Save Plan & Check Drawdown")
-        all_logs = gs_handler.load_all_planned_trade_logs_from_gsheets()
+        # แก้ไข: ส่ง user_id เข้าไปในการโหลด all planned trade logs
+        all_logs = db_handler.load_all_planned_trade_logs(user_id=user_id)
         portfolio_logs = pd.DataFrame()
         if active_id and not all_logs.empty:
             portfolio_logs = all_logs[all_logs['PortfolioID'] == str(active_id)]
@@ -341,19 +345,20 @@ def render_sidebar():
                 risk_pct_to_save = risk_to_use
                 direction_to_save = planning_result.get('direction', 'N/A')
                 
-                success = gs_handler.save_plan_to_gsheets(
-                    plan_data_list=st.session_state.entry_data_for_saving, 
-                    trade_mode_arg=current_mode, 
+                success, msg = db_handler.save_planned_trade_logs(
+                    plan_data_list=st.session_state.get('entry_data_for_saving', []), 
+                    trade_mode=current_mode, 
                     asset_name=asset_to_save, 
-                    risk_percentage=risk_pct_to_save, 
+                    risk_percentage=risk_to_use, # หมายเหตุ: risk_to_use ต้องถูกคำนวณมาก่อนหน้านี้
                     trade_direction=direction_to_save, 
                     portfolio_id=active_id, 
-                    portfolio_name=st.session_state.get('active_portfolio_name_gs', 'N/A')
+                    portfolio_name=st.session_state.get('active_portfolio_name_gs', 'N/A'),
+                    user_id=user_id # <<< แก้ไข: เพิ่ม user_id
                 )
                 
                 if success:
-                    st.success("✔️ Plan saved successfully!"); st.balloons()
-                    gs_handler.load_all_planned_trade_logs_from_gsheets.clear()
+                    st.success(f"✔️ {msg}"); st.balloons()
+                    # ไม่จำเป็นต้อง clear cache ของ gs_handler อีกต่อไป
                     st.rerun()
                 else:
-                    st.error("❌ An error occurred while saving the plan.")
+                    st.error(f"❌ {msg}")

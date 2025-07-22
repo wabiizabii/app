@@ -27,3 +27,13 @@ scaling.py
 
 # Ignore history files
 .history/
+
+# Ignore Streamlit secrets file
+.streamlit/secrets.toml
+
+
+# Ignore any other sensitive files or build artifacts
+*.pyc
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store

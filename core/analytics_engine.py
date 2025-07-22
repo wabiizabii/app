@@ -1,30 +1,51 @@
-# core/analytics_engine.py (รวมฟังก์ชัน Analytics ทั้งหมด)
-import streamlit as st #
+# core/analytics_engine.py (รวมฟังก์ชัน Analytics ทั้งหมด - ฉบับแก้ไขสมบูรณ์)
+import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import pytz 
+
+# --- NEW: Helper function to ensure datetime is timezone-aware and in UTC ---
+def _ensure_utc_datetime(series: pd.Series) -> pd.Series:
+    """
+    Ensures a pandas Series of datetime objects is timezone-aware (UTC)
+    for consistent comparisons.
+    """
+    if not pd.api.types.is_datetime64_any_dtype(series):
+        series = pd.to_datetime(series, errors='coerce')
+
+    series = series.dropna() # Drop NaT values after conversion attempts
+
+    if series.empty:
+        return series # Return empty series if no valid datetimes
+
+    if series.dt.tz is None: # If no timezone, localize to UTC
+        return series.dt.tz_localize(pytz.utc)
+    elif series.dt.tz != pytz.utc: # If different timezone, convert to UTC
+        return series.dt.tz_convert(pytz.utc)
+    return series # Already UTC
 
 def get_today_drawdown(df_logs: pd.DataFrame) -> float:
    
     if df_logs is None or df_logs.empty:
         return 0.0
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
     df_logs_cleaned = df_logs.copy()
 
-    # Ensure 'Timestamp' column exists and is of datetime type
+    # Ensure 'Timestamp' column exists and is UTC datetime
     if 'Timestamp' not in df_logs_cleaned.columns:
         return 0.0
-    if not pd.api.types.is_datetime64_any_dtype(df_logs_cleaned['Timestamp']):
-        df_logs_cleaned['Timestamp'] = pd.to_datetime(df_logs_cleaned['Timestamp'], errors='coerce')
+    
+    df_logs_cleaned['Timestamp'] = _ensure_utc_datetime(df_logs_cleaned['Timestamp'])
+    df_logs_cleaned.dropna(subset=['Timestamp'], inplace=True) # Drop rows where timestamp conversion failed or became NaT
 
-    # Drop rows where timestamp conversion failed
-    df_logs_cleaned.dropna(subset=['Timestamp'], inplace=True)
-
-    if 'Risk $' not in df_logs_cleaned.columns:
+    if df_logs_cleaned.empty or 'Risk $' not in df_logs_cleaned.columns:
         return 0.0
-        
-    df_today = df_logs_cleaned[df_logs_cleaned["Timestamp"].dt.strftime("%Y-%m-%d") == today_str]
+    
+    # Get today's date in UTC to match the DataFrame's timezone
+    today_utc = datetime.now(pytz.utc).date()
+    
+    df_today = df_logs_cleaned[df_logs_cleaned["Timestamp"].dt.date == today_utc]
     drawdown = df_today["Risk $"].sum()
     
     return float(drawdown) if pd.notna(drawdown) else 0.0
@@ -36,20 +57,27 @@ def get_performance(df_logs, period="week"):
         return 0.0, 0.0, 0
 
     df_logs_cleaned = df_logs.copy()
-    if 'Timestamp' not in df_logs_cleaned.columns or not pd.api.types.is_datetime64_any_dtype(df_logs_cleaned['Timestamp']):
-        df_logs_cleaned['Timestamp'] = pd.to_datetime(df_logs_cleaned['Timestamp'], errors='coerce')
-    
+    if 'Timestamp' not in df_logs_cleaned.columns:
+        return 0.0
+        
+    df_logs_cleaned['Timestamp'] = _ensure_utc_datetime(df_logs_cleaned['Timestamp'])
     df_logs_cleaned.dropna(subset=['Timestamp'], inplace=True)
-    if 'Risk $' not in df_logs_cleaned.columns:
+    
+    if df_logs_cleaned.empty or 'Risk $' not in df_logs_cleaned.columns:
         return 0.0, 0.0, 0
 
-    now = datetime.now()
+    # Use UTC for current time and comparison
+    now_utc = datetime.now(pytz.utc)
+    
     if period == "week":
-        start_date = now - pd.Timedelta(days=now.weekday())
-        df_period = df_logs_cleaned[df_logs_cleaned["Timestamp"] >= start_date.replace(hour=0, minute=0, second=0, microsecond=0)]
+        # Calculate start of the week (Monday) in UTC
+        start_date = now_utc - pd.Timedelta(days=now_utc.weekday())
+        start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
     else:  # month
-        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        df_period = df_logs_cleaned[df_logs_cleaned["Timestamp"] >= start_date]
+        # Calculate start of the month in UTC
+        start_date = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    df_period = df_logs_cleaned[df_logs_cleaned["Timestamp"] >= start_date]
     
     win = df_period[df_period["Risk $"] > 0].shape[0]
     loss = df_period[df_period["Risk $"] <= 0].shape[0]
@@ -69,8 +97,14 @@ def calculate_simulated_drawdown(df_trades: pd.DataFrame, starting_balance: floa
     peak_balance = starting_balance
     
     df_calc = df_trades.copy()
-    if "Timestamp" in df_calc.columns and pd.api.types.is_datetime64_any_dtype(df_calc['Timestamp']):
+    if "Timestamp" in df_calc.columns:
+        df_calc['Timestamp'] = _ensure_utc_datetime(df_calc['Timestamp'])
+        df_calc.dropna(subset=['Timestamp'], inplace=True)
         df_calc = df_calc.sort_values(by="Timestamp", ascending=True)
+    else:
+        # If no Timestamp, sorting isn't critical for this calc, just ensure numeric
+        df_calc['Risk $'] = pd.to_numeric(df_calc['Risk $'], errors='coerce').fillna(0.0)
+
 
     for pnl in df_calc["Risk $"]:
         current_balance += pnl
@@ -127,7 +161,8 @@ def analyze_planned_trades_for_ai(
     
     results["max_drawdown_simulated"] = calculate_simulated_drawdown(df_to_analyze, balance_for_simulation)
 
-    if "Timestamp" in df_to_analyze.columns and pd.api.types.is_datetime64_any_dtype(df_to_analyze['Timestamp']):
+    if "Timestamp" in df_to_analyze.columns:
+        df_to_analyze['Timestamp'] = _ensure_utc_datetime(df_to_analyze['Timestamp'])
         df_daily_pnl = df_to_analyze.dropna(subset=["Timestamp"])
         if not df_daily_pnl.empty:
             df_daily_pnl["Weekday"] = df_daily_pnl["Timestamp"].dt.day_name()
@@ -260,7 +295,7 @@ def get_dashboard_analytics_for_actual(df_all_actual_trades, df_all_statement_su
 
     # Prepare data for balance curve chart
     if 'Time_Deal' in df_actual.columns and 'Balance_Deal' in df_actual.columns:
-        df_actual['Time_Deal'] = pd.to_datetime(df_actual['Time_Deal'])
+        df_actual['Time_Deal'] = _ensure_utc_datetime(df_actual['Time_Deal']) # Ensure UTC for consistency
         balance_curve_df = df_actual.sort_values(by='Time_Deal')[['Time_Deal', 'Balance_Deal']].rename(
             columns={'Time_Deal': 'Time', 'Balance_Deal': 'Balance'}
         ).set_index('Time')
@@ -327,11 +362,11 @@ def analyze_combined_trades_for_ai(
     results["data_found"] = True
 
     # 2. Prepare Data Columns
-    df_a['Time_Deal'] = pd.to_datetime(df_a['Time_Deal'], errors='coerce')
+    df_a['Time_Deal'] = _ensure_utc_datetime(df_a['Time_Deal']) # Ensure UTC for consistency
     df_a['Profit_Deal'] = pd.to_numeric(df_a['Profit_Deal'], errors='coerce').fillna(0)
     df_a.dropna(subset=['Time_Deal'], inplace=True)
     
-    df_p['Timestamp'] = pd.to_datetime(df_p['Timestamp'], errors='coerce')
+    df_p['Timestamp'] = _ensure_utc_datetime(df_p['Timestamp']) # Ensure UTC for consistency
     df_p['Risk $'] = pd.to_numeric(df_p['Risk $'], errors='coerce').fillna(0)
     
     # --- INSIGHT GENERATION ---
@@ -433,7 +468,7 @@ def generate_risk_alerts(
     return alerts
 
 def generate_weekly_summary(df_all_actual_trades: pd.DataFrame, active_portfolio_id: str) -> str | None:
-    
+
     if df_all_actual_trades.empty or not active_portfolio_id:
         return None
 
@@ -442,44 +477,51 @@ def generate_weekly_summary(df_all_actual_trades: pd.DataFrame, active_portfolio
 
     # --- จุดที่แก้ไขและจัดระเบียบ ---
     # 2. ตรวจสอบและแปลงประเภทข้อมูล (Data Cleaning) ให้เรียบร้อยก่อนใช้งาน
-    
+
     # บังคับให้ Time_Deal เป็น datetime และลบแถวที่แปลงไม่ได้ทิ้ง
     if 'Time_Deal' in df.columns:
         df['Time_Deal'] = pd.to_datetime(df['Time_Deal'], errors='coerce')
         df.dropna(subset=['Time_Deal'], inplace=True)
     else:
-        # ถ้าไม่มีคอลัมน์เวลา ก็ไม่สามารถวิเคราะห์รายสัปดาห์ได้
         return None
 
     # บังคับให้ Profit_Deal เป็นตัวเลข (จากครั้งก่อน)
     if 'Profit_Deal' in df.columns:
         df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
     else:
-        # ถ้าไม่มีคอลัมน์กำไร ก็ไม่สามารถคำนวณได้
         return None
 
     # เปลี่ยนชื่อคอลัมน์ Symbol (ทำครั้งเดียว)
     if 'Symbol_Deal' in df.columns:
-        df.rename(columns={'Symbol_Deal': 'Symbol'}, inplace=True)
-    # --- สิ้นสุดจุดที่แก้ไข ---
+        df.rename(columns={'Symbol_Deal': 'Symbol'}, inplace=True, errors='ignore')
 
-    # 3. กรองข้อมูลเฉพาะสัปดาห์ล่าสุด
-    end_date = datetime.now()
+
+    # --- ส่วนแก้ไข Timezone ที่ถูกต้อง (คงไว้) ---
+    # ทำให้ end_date และ start_date มี Timezone เป็น UTC
+    end_date = datetime.now(pytz.utc) 
     start_date = end_date - timedelta(days=7)
-    
-    week_df = df[df['Time_Deal'] >= start_date]
+
+    # ทำให้ df['Time_Deal'] มี Timezone เป็น UTC ก่อนเปรียบเทียบ
+    if df['Time_Deal'].dt.tz is None: 
+        df['Time_Deal'] = df['Time_Deal'].dt.tz_localize(pytz.utc)
+    elif df['Time_Deal'].dt.tz != pytz.utc: 
+        df['Time_Deal'] = df['Time_Deal'].dt.tz_convert(pytz.utc)
+
+
+    # 3. กรองข้อมูลเฉพาะสัปดาห์ล่าสุด (ใช้ start_date ที่มี timezone แล้ว)
+    week_df = df[df['Time_Deal'] >= start_date].copy()
 
     # ถ้ามีข้อมูลน้อยกว่า 3 เทรดในสัปดาห์ ก็ยังไม่สรุปผล
     if week_df.empty or len(week_df) < 3:
         return None
 
-    # 4. คำนวณ Metrics ที่สำคัญ (เหมือนเดิม)
+    # 4. คำนวณ Metrics ที่สำคัญ
     net_profit = week_df['Profit_Deal'].sum()
     total_trades = len(week_df)
-    win_trades = len(week_df[week_df['Profit_Deal'] > 0])
-    win_rate = (win_trades / total_trades) * 100 if total_trades > 0 else 0
+    win_trades = len(week_df[week_df['Profit_Deal'] > 0]) # คำนวณ win_trades
+    win_rate = (100 * win_trades / total_trades) if total_trades > 0 else 0 # ใช้ win_trades แทน win
 
-    # 5. หาข้อมูลเชิงลึก (เหมือนเดิม)
+    # 5. หาข้อมูลเชิงลึก
     week_df['Weekday'] = week_df['Time_Deal'].dt.day_name()
     daily_pnl = week_df.groupby('Weekday')['Profit_Deal'].sum()
     
@@ -587,7 +629,7 @@ def get_advanced_statistics(df_all_actual_trades: pd.DataFrame, active_portfolio
     if df.empty:
         return {}
         
-    df['Time_Deal'] = pd.to_datetime(df['Time_Deal'])
+    df['Time_Deal'] = _ensure_utc_datetime(df['Time_Deal']) # Ensure UTC for consistency
     df = df.sort_values(by='Time_Deal', ascending=False)
     df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
 
@@ -624,13 +666,14 @@ def get_advanced_statistics(df_all_actual_trades: pd.DataFrame, active_portfolio
 
     total_profit = df[df['Profit_Deal'] > 0]['Profit_Deal'].sum()
     if total_profit > 0:
-        daily_pnl = df.groupby(df['Time_Deal'].dt.date)['Profit_Deal'].sum()
+        # Ensure timestamp is UTC before converting to date
+        daily_pnl = df.groupby(df['Time_Deal'].dt.date)['Profit_Deal'].sum() 
         best_day_profit = daily_pnl[daily_pnl > 0].max()
         results['profit_concentration'] = (best_day_profit / total_profit) * 100
     else:
         results['profit_concentration'] = 0
 
-    thirty_days_ago = datetime.now() - timedelta(days=30)
+    thirty_days_ago = datetime.now(pytz.utc) - timedelta(days=30) # Ensure UTC for comparison
     results['active_trading_days'] = df[df['Time_Deal'] > thirty_days_ago]['Time_Deal'].dt.normalize().nunique()
     
     return results
@@ -652,7 +695,7 @@ def get_full_dashboard_stats(df_all_actual_trades: pd.DataFrame, df_all_summarie
         df = df[~df['Type_Deal'].str.lower().isin(trade_types_to_exclude)]
         
         if not df.empty:
-            df['Time_Deal'] = pd.to_datetime(df['Time_Deal'], errors='coerce')
+            df['Time_Deal'] = _ensure_utc_datetime(df['Time_Deal']) # Ensure UTC for consistency
             df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
             
             # Determine trade direction
@@ -709,8 +752,8 @@ def get_full_dashboard_stats(df_all_actual_trades: pd.DataFrame, df_all_summarie
             stats['Active_Trading_Days_Total'] = df['Time_Deal'].dt.normalize().nunique()
             
             # Placeholder for today's PnL (actual trades for the current day)
-            today_str = datetime.now().strftime('%Y-%m-%d')
-            stats['Today_PnL_Actual'] = df[df['Time_Deal'].dt.strftime('%Y-%m-%d') == today_str]['Profit_Deal'].sum()
+            today_utc = datetime.now(pytz.utc).date() # Use UTC for comparison
+            stats['Today_PnL_Actual'] = df[df['Time_Deal'].dt.date == today_utc]['Profit_Deal'].sum()
 
 
     # --- Part 2: Override/Supplement with data from the LATEST StatementSummaries entry ---
@@ -719,8 +762,11 @@ def get_full_dashboard_stats(df_all_actual_trades: pd.DataFrame, df_all_summarie
         df_summary_filtered = df_all_summaries[df_all_summaries['PortfolioID'] == active_portfolio_id].copy()
         
         if not df_summary_filtered.empty and 'DateTime' in df_summary_filtered.columns:
+            # Ensure Timestamp is UTC for sorting
+            df_summary_filtered['Timestamp'] = _ensure_utc_datetime(df_summary_filtered['Timestamp'])
+            
             # Get the latest summary row for this portfolio
-            latest_summary_row = df_summary_filtered.sort_values(by='DateTime', ascending=False).iloc[0]
+            latest_summary_row = df_summary_filtered.sort_values(by='Timestamp', ascending=False).iloc[0]
 
             # Helper to safely get numeric value from summary row
             def get_summary_numeric(col_name, default_value=0.0):
@@ -818,7 +864,7 @@ def get_ai_powered_insights(df_all_actual_trades: pd.DataFrame, active_portfolio
         return {}
 
     # --- ตรรกะการวิเคราะห์ข้อมูล ---
-    df['Time_Deal'] = pd.to_datetime(df['Time_Deal'])
+    df['Time_Deal'] = _ensure_utc_datetime(df['Time_Deal']) # Ensure UTC for consistency
     df['Profit_Deal'] = pd.to_numeric(df['Profit_Deal'], errors='coerce').fillna(0)
     
     if 'DealDirection' in df.columns and not df['DealDirection'].isnull().all():
@@ -890,7 +936,7 @@ def calculate_true_equity_curve(df_summaries: pd.DataFrame, portfolio_id: str):
                 errors='coerce'
             ).fillna(0)
 
-    df_filtered['Timestamp'] = pd.to_datetime(df_filtered['Timestamp'], errors='coerce')
+    df_filtered['Timestamp'] = _ensure_utc_datetime(df_filtered['Timestamp']) # Ensure UTC for consistency
     df_filtered.dropna(subset=['Timestamp'], inplace=True)
 
     if df_filtered.empty:
