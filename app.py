@@ -1,146 +1,143 @@
-# app.py (ฉบับแก้ไขสมบูรณ์)
+# app.py
 
 import streamlit as st
+import sys
+import os
 import pandas as pd
-from datetime import datetime
 
-# --- ตั้งค่าหน้าเว็บเป็นคำสั่งแรกสุด ---
-st.set_page_config(
-    page_title="Ultimate Chart Dashboard",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# --- Path Management ---
+trading_dashboard_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(trading_dashboard_dir)
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
-# --- Local Application Modules (นำกลับมาทั้งหมด) ---
-from config import settings
-from core import gs_handler, analytics_engine
-from ui import (
-    sidebar,
-    portfolio_section,
-    statement_section,
-    entry_table_section,
-    chart_section,
-    log_viewer_section,
-    ai_section
-)
+# --- Imports from our project ---
+from trading_dashboard.ui.sidebar import build_sidebar
+from trading_dashboard.ui.main_components.realtime_dashboard import realtime_dashboard_component
+from trading_dashboard.config.settings import SUPABASE_URL, SUPABASE_KEY, ASSET_SPECIFICATIONS
+from trading_dashboard.core.supabase_handler import SupabaseHandler
+from trading_dashboard.core.mt5_handler import MT5Handler
+from trading_dashboard.core.planning_logic import create_trade_plan
+from signal_analyzer.src.signal_generator import generate_signal_for_symbol
 
-# ============================== SESSION STATE INITIALIZATION ==============================
-if 'initial_portfolio_setup_done' not in st.session_state:
-    st.session_state.initial_portfolio_setup_done = False
-if 'uploader_key' not in st.session_state:
-    st.session_state.uploader_key = 0
-if 'latest_statement_equity' not in st.session_state:
-    st.session_state.latest_statement_equity = None
-if 'current_account_balance' not in st.session_state:
-    st.session_state.current_account_balance = settings.DEFAULT_ACCOUNT_BALANCE
-if 'active_portfolio_name_gs' not in st.session_state:
-    st.session_state.active_portfolio_name_gs = ""
-if 'active_portfolio_id_gs' not in st.session_state:
-    st.session_state.active_portfolio_id_gs = None
-if 'current_portfolio_details' not in st.session_state:
-    st.session_state.current_portfolio_details = None
-
-def initialize_session_state():
-    """Centralized function to initialize all *other* session state variables."""
-    states = {
-        'mode': "FIBO",
-        'drawdown_limit_pct': settings.DEFAULT_DRAWDOWN_LIMIT_PCT,
-    }
-    for key, value in states.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-
+# --- Main App Logic ---
 def main():
-    """Main function to run the Streamlit application."""
-    initialize_session_state()
-    df_portfolios_gs = gs_handler.load_portfolios_from_gsheets() 
+    st.set_page_config(layout="wide", page_title="AI Trading Assistant")
+
+    # --- Initialize Handlers in Session State ---
+    if 'db_handler' not in st.session_state:
+        st.session_state.db_handler = SupabaseHandler(SUPABASE_URL, SUPABASE_KEY)
+    if 'mt5_handler' not in st.session_state:
+        st.session_state.mt5_handler = MT5Handler()
+        st.session_state.mt5_handler.initialize_connection()
+    if 'websocket_data_key' not in st.session_state:
+        st.session_state['websocket_data_key'] = 0
     
-    if not st.session_state.initial_portfolio_setup_done and not df_portfolios_gs.empty:
-        st.session_state.active_portfolio_id_gs = df_portfolios_gs.iloc[0]['PortfolioID']
-        st.session_state.active_portfolio_name_gs = df_portfolios_gs.iloc[0]['PortfolioName']
-        st.session_state.initial_portfolio_setup_done = True
+    # --- Real-time Component (ทำงานเบื้องหลัง) ---
+    session_state_from_js = realtime_dashboard_component()
 
-    # ======================================================================================
-    # --- START: โค้ดที่แก้ไขตรรกะการจัดการ BALANCE ทั้งหมด ---
-    # ======================================================================================
-    if st.session_state.active_portfolio_id_gs:
-        current_portfolio_details_df = df_portfolios_gs[df_portfolios_gs['PortfolioID'] == st.session_state.active_portfolio_id_gs]
-        st.session_state.current_portfolio_details = current_portfolio_details_df.iloc[0].to_dict() if not current_portfolio_details_df.empty else None
+    if isinstance(session_state_from_js, dict):
+        for key in ['risk_available_today', 'daily_loss_limit_amount', 'total_open_risk']:
+             if key in session_state_from_js:
+                  session_state_from_js[key] = float(session_state_from_js.get(key, 0.0))
 
-        latest_equity_from_sheet = None
-        df_summaries = gs_handler.load_statement_summaries_from_gsheets()
+        st.session_state.update(session_state_from_js)
+        st.session_state['websocket_data_key'] += 1
+        st.rerun()
+
+    # --- UI Rendering ---
+    build_sidebar()
+    
+    is_link_valid = st.session_state.get('is_link_valid', False)
+    data_streamer_status = st.session_state.get('data_streamer_status', 'Waiting')
+
+    if is_link_valid:
+        st.sidebar.success("✅ Link Active")
         
-        if not df_summaries.empty:
-            # ---- START: การแก้ไขที่สำคัญที่สุด ----
-            # บังคับให้คอลัมน์ PortfolioID เป็นประเภท string เพื่อให้การเปรียบเทียบถูกต้องเสมอ
-            if 'PortfolioID' in df_summaries.columns:
-                df_summaries['PortfolioID'] = df_summaries['PortfolioID'].astype(str)
-            # ---- END: การแก้ไขที่สำคัญที่สุด ----
+        tab1, tab2, tab3 = st.tabs(["📊 Main Dashboard", "💡 Trade Planner", "⚙️ Settings"])
 
-            portfolio_summaries = df_summaries[df_summaries['PortfolioID'] == st.session_state.active_portfolio_id_gs].copy()
-            
-            if not portfolio_summaries.empty:
-                portfolio_summaries['Timestamp'] = pd.to_datetime(portfolio_summaries['Timestamp'], errors='coerce')
-                portfolio_summaries.dropna(subset=['Timestamp'], inplace=True)
+        with tab1:
+            st.header("📊 Main Dashboard")
+            st.write("Live data is being displayed by the real-time component.")
+
+        with tab2:
+            st.header("💡 Trade Planner")
+            col1, col2 = st.columns([1, 3])
+
+            with col1:
+                st.subheader("Controls")
                 
-                if not portfolio_summaries.empty:
-                    latest_row = portfolio_summaries.sort_values(by='Timestamp', ascending=False).iloc[0]
-                    equity_value = latest_row.get('Equity')
-                    if equity_value is not None and str(equity_value).strip() != "":
-                        latest_equity_from_sheet = equity_value
-
-        if latest_equity_from_sheet is not None:
-             st.session_state.latest_statement_equity = latest_equity_from_sheet
-
-        final_equity_value = st.session_state.get('latest_statement_equity')
-        
-        if final_equity_value is not None:
-            try:
-                cleaned_equity_str = str(final_equity_value).replace(',', '').replace(' ', '')
-                st.session_state.current_account_balance = float(cleaned_equity_str)
-            except (ValueError, TypeError):
-                if st.session_state.current_portfolio_details and pd.notna(st.session_state.current_portfolio_details.get('InitialBalance')):
-                    cleaned_initial_balance = str(st.session_state.current_portfolio_details['InitialBalance']).replace(',', '').replace(' ', '')
-                    st.session_state.current_account_balance = float(cleaned_initial_balance)
+                st.info("Daily Risk Status")
+                risk_available = st.session_state.get('risk_available_today', 0.0)
+                risk_limit = st.session_state.get('daily_loss_limit_amount', 0.0)
+                risk_used = st.session_state.get('total_open_risk', 0.0)
+                
+                if risk_available <= 0:
+                    st.metric(label="Risk Available", value=f"${risk_available:,.2f}", delta="STOP TRADING", delta_color="inverse")
                 else:
-                    st.session_state.current_account_balance = settings.DEFAULT_ACCOUNT_BALANCE
-        elif st.session_state.current_portfolio_details and pd.notna(st.session_state.current_portfolio_details.get('InitialBalance')):
-            cleaned_initial_balance = str(st.session_state.current_portfolio_details['InitialBalance']).replace(',', '').replace(' ', '')
-            st.session_state.current_account_balance = float(cleaned_initial_balance)
-        else:
-            st.session_state.current_account_balance = settings.DEFAULT_ACCOUNT_BALANCE
+                    st.metric(label="Risk Available", value=f"${risk_available:,.2f}")
+                
+                st.caption(f"Limit: ${risk_limit:,.2f} | Used: ${risk_used:,.2f}")
+                st.divider()
+
+                # --- START: แก้ไขการสร้าง Selectbox ---
+                account_type = st.session_state.get('account_type', 'STANDARD').upper()
+                available_symbols = list(ASSET_SPECIFICATIONS.get(account_type, {}).keys())
+                selected_symbol = st.selectbox("Select Symbol:", available_symbols) 
+                # --- END: แก้ไขการสร้าง Selectbox ---
+                
+                if st.button("🚀 Generate New Plan"):
+                    with st.spinner("Analyzing market and generating plan..."):
+                        try:
+                            mt5 = st.session_state.mt5_handler
+                            
+                            signal = generate_signal_for_symbol(symbol=selected_symbol, mt5_handler=mt5)
+                            st.write(f"Generated Signal: **{signal['signal_text']}**")
+
+                            live_account_info = mt5.get_account_info()
+                            risk_available = st.session_state.get('risk_available_today', 0.0)
+                            
+                            trade_plan = create_trade_plan(
+                                signal=signal['signal_code'],
+                                symbol=selected_symbol,
+                                account_info=live_account_info,
+                                risk_available=risk_available
+                            )
+                            
+                            st.session_state['generated_plan'] = trade_plan
+                        except Exception as e:
+                            st.error(f"An error occurred: {e}")
+                else:
+                    if 'generated_plan' not in st.session_state:
+                         st.session_state['generated_plan'] = None
+
+            with col2:
+                st.subheader("Generated Trade Plan")
+                plan_placeholder = st.container()
+                
+                if st.session_state.get('generated_plan'):
+                    plan = st.session_state['generated_plan']
+                    with plan_placeholder:
+                        st.dataframe(pd.DataFrame([plan]))
+                        if st.button("💾 Save Plan to Log"):
+                            st.success("Plan saved! (This feature is coming soon)")
+                        if st.button("🔥 Execute via EA", type="primary"):
+                            st.warning("Executing via EA! (This feature is coming soon)")
+                else:
+                    with plan_placeholder:
+                        st.info("Click 'Generate New Plan' to get started.")
+
+        with tab3:
+            st.header("⚙️ Portfolio & Connection Settings")
+            st.write("ส่วนตั้งค่า Portfolio และการเชื่อมต่อจะอยู่ที่นี่")
+            
     else:
-        st.session_state.current_account_balance = settings.DEFAULT_ACCOUNT_BALANCE
-        st.session_state.latest_statement_equity = None
-        st.session_state.current_portfolio_details = None
-        st.session_state.active_portfolio_name_gs = ""
-    # ======================================================================================
-    # --- END: สิ้นสุดส่วนแก้ไขตรรกะ BALANCE ---
-    # ======================================================================================
-        
-    sidebar.render_sidebar()
-    
-    active_id = st.session_state.get('active_portfolio_id_gs')
-    if active_id:
-        df_actual_trades = gs_handler.load_actual_trades_from_gsheets()
-        summary_message = analytics_engine.generate_weekly_summary(df_all_actual_trades=df_actual_trades, active_portfolio_id=active_id)
-        if summary_message and not st.session_state.get(f"summary_shown_{datetime.now().isocalendar().week}", False):
-            st.info(summary_message)
-            st.session_state[f"summary_shown_{datetime.now().isocalendar().week}"] = True
+        if data_streamer_status == 'Waiting' and not session_state_from_js:
+            st.info("⌛ กำลังรอข้อมูลจาก Data Streamer...")
+            st.warning("กรุณาตรวจสอบว่า Service 'mt5_data_streamer.py' กำลังทำงานอยู่")
+        else:
+            st.sidebar.error("❌ Link Inactive")
+            st.error("ไม่สามารถแสดงผลข้อมูลได้: กรุณาตรวจสอบการตั้งค่าใน Sidebar และสถานะของ Data Streamer")
 
-    with st.container():
-        if hasattr(portfolio_section, 'render_portfolio_manager_expander'):
-            portfolio_section.render_portfolio_manager_expander(gs_handler, df_portfolios_gs)
-        if hasattr(statement_section, 'render_statement_section'):
-            statement_section.render_statement_section(df_portfolios_gs=df_portfolios_gs)
-        if hasattr(entry_table_section, 'render_entry_table_section'):
-            entry_table_section.render_entry_table_section()
-        if hasattr(chart_section, 'render_chart_section'):
-            chart_section.render_chart_section()
-        if hasattr(ai_section, 'render_ai_section'):
-            ai_section.render_ai_section()
-        if hasattr(log_viewer_section, 'render_log_viewer_section'):
-            log_viewer_section.render_log_viewer_section()
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -27,3 +27,4 @@ scaling.py
 
 # Ignore history files
 .history/
+.env

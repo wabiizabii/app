@@ -1,0 +1,169 @@
+import streamlit as st
+import pandas as pd
+import os
+from dotenv import load_dotenv
+
+# --- Page config must be the FIRST Streamlit command ---
+st.set_page_config(
+    page_title="PPC-AI Trading Assistant",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- Import project modules (now after page_config) ---
+from ui import sidebar, portfolio_dashboard_tab, ai_section, entry_table_section, portfolio_data_management_tab, chart_section, planned_trades_section
+from ui.main_components.realtime_dashboard import realtime_dashboard
+from core import planning_logic, supabase_handler, analytics_engine
+from config import settings
+
+# --- Load Environment Variables ---
+load_dotenv()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+# --- Initialize SupabaseHandler ---
+@st.cache_resource
+def get_db_handler():
+    """Initializes and caches the SupabaseHandler."""
+    if SUPABASE_URL is None or SUPABASE_KEY is None:
+        st.error("Supabase credentials not found. Please check your .env file.")
+        return None
+    return supabase_handler.SupabaseHandler(SUPABASE_URL, SUPABASE_KEY)
+
+db_handler = get_db_handler()
+
+if db_handler is None or db_handler.client is None:
+    st.error("Failed to connect to Supabase. Please check your configuration and internet connection.")
+    st.stop()
+
+# Initialize essential session state variables
+states_to_initialize = {
+    'active_tab_main': 'Dashboard',
+    'current_account_balance': settings.DEFAULT_ACCOUNT_BALANCE,
+    'planning_result': None,
+    'mode': "FIBO",
+    'active_portfolio_id': None,
+    'active_portfolio_name': None,
+    'calculate_button_v2': False,
+    'mode_selector_v2': 'FIBO',
+    'risk_pct_val_v2': settings.DEFAULT_RISK_PERCENT,
+    'fibo_levels_v2': '1.618, 2.618',
+    'sl_fibo_val_v2': 0.0,
+    'direction_fibo_val_v2': 'BUY',
+    'asset_fibo_val_v2': 'XAUUSD',
+    'custom_entry': 0.0, 'custom_sl': 0.0, 'custom_tp': 0.0, 'custom_lot': 0.0,
+    'custom_direction': 'BUY', 'custom_asset': 'XAUUSD'
+}
+for key, value in states_to_initialize.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+# --- Main Application Logic ---
+
+# Render the sidebar and pass the db_handler
+with st.sidebar:
+    is_link_valid = sidebar.render(db_handler)
+
+if not is_link_valid:
+    st.error("❌ การเชื่อมโยง Portfolio และ MT5 ไม่ถูกต้อง")
+    st.warning("การทำงานของหน้าหลักถูกระงับชั่วคราวเพื่อป้องกันข้อมูลผิดพลาด กรุณาแก้ไขการเชื่อมโยงใน Sidebar")
+    st.stop() 
+
+if not st.session_state.get('active_portfolio_id'):
+    st.title("Welcome to PPC-AI Trading Assistant")
+    st.info("Please select a portfolio or create a new one in the sidebar to get started.")
+    st.stop() 
+
+# --- Main content area ---
+st.header("📈 Real-time Account Status (Live Feed)")
+realtime_dashboard()
+st.markdown("---")
+
+# Main content area with tabs
+tab_dashboard, tab_ai, tab_planned_trades, tab_charts, tab_data_mgmt, tab_debug = st.tabs([
+    "📈 Dashboard",
+    "🤖 AI Insights",
+    "📊 Planned Trades",
+    "📊 Analysis & Chart",
+    "💼 Portfolio & Data Management",
+    "🐞 Debug & Status"
+])
+
+with tab_dashboard:
+    portfolio_dashboard_tab.render(db_handler)
+
+with tab_ai:
+    ai_section.render_ai_insights_section(db_handler)
+
+with tab_planned_trades:
+    planned_trades_section.render_planned_trades_section(db_handler)
+
+    # Logic to handle trade planning calculation (remains here)
+    if st.session_state.get('calculate_button_v2'):
+        try:
+            planning_params = {} 
+            mode = st.session_state['mode_selector_v2']
+            
+            if mode == "FIBO":
+                planning_params = {
+                    'mode': 'FIBO',
+                    'balance': st.session_state['current_account_balance'],
+                    'risk_pct': st.session_state['risk_pct_val_v2'],
+                    'fibo_levels': [float(lvl.strip()) for lvl in st.session_state['fibo_levels_v2'].split(',') if lvl.strip()],
+                    'sl_price': st.session_state['sl_fibo_val_v2'],
+                    'direction': st.session_state['direction_fibo_val_v2'],
+                    'asset': st.session_state['asset_fibo_val_v2'],
+                    'lot_unit': settings.LOT_UNIT_XAUUSD
+                }
+            elif mode == "CUSTOM":
+                planning_params = {
+                    'mode': 'CUSTOM',
+                    'balance': st.session_state['current_account_balance'],
+                    'risk_pct': st.session_state['risk_pct_val_v2'],
+                    'entry_price': st.session_state['custom_entry'],
+                    'sl_price': st.session_state['custom_sl'],
+                    'tp_price': st.session_state['custom_tp'],
+                    'lot_size': st.session_state['custom_lot'],
+                    'direction': st.session_state['custom_direction'],
+                    'asset': st.session_state['custom_asset'],
+                    'lot_unit': settings.LOT_UNIT_XAUUSD
+                }
+
+            if planning_params:
+                planning_result = planning_logic.calculate_trade_plan(**planning_params)
+                st.session_state['planning_result'] = planning_result
+            else:
+                st.session_state['planning_result'] = None
+
+        except Exception as e:
+            st.error(f"Error during trade planning calculation: {e}")
+            st.session_state['planning_result'] = {'error_message': str(e)}
+
+    entry_table_section.render_entry_table_section(db_handler)
+
+with tab_charts:
+    chart_section.render_chart_section(db_handler)
+
+with tab_data_mgmt:
+    portfolio_data_management_tab.render(db_handler)
+
+with tab_debug:
+    st.subheader("🐞 Debugging MT5 Link Status")
+    st.info("This information is for developers to diagnose connection issues.")
+    
+    debug_info = {
+        "Active Portfolio ID": st.session_state.get('active_portfolio_id'),
+        "Active Portfolio Name": st.session_state.get('active_portfolio_name'),
+        "Linked MT5 ID in DB": st.session_state.get('linked_mt5_id'),
+        "Current Live MT5 Account": st.session_state.get('live_mt5_account'),
+        "Live MT5 Account linked to any Portfolio": st.session_state.get('live_mt5_linked_portfolio_name', "None")
+    }
+    
+    for key, value in debug_info.items():
+        st.text(f"{key}: {value}")
+    
+    if st.session_state.get('is_link_valid', False):
+         st.success(f"✅ Portfolio '{debug_info['Active Portfolio Name']}' is correctly linked to MT5 Account {debug_info['Current Live MT5 Account']}.")
+    else:
+         st.error(f"❌ Mismatch or error in portfolio and MT5 account link.")

@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 from config import settings
+from typing import Optional # Import Optional for type hinting
 
 def calculate_fibo_trade_plan(
     swing_high_str: str,
@@ -10,9 +11,12 @@ def calculate_fibo_trade_plan(
     risk_pct_fibo_input: float,
     fibo_levels_definitions: list,
     fibo_flags_selected: list,
-    direction: str,
+    direction: str, # Existing parameter for user-selected direction
     current_active_balance: float,
-    spread_str: str
+    spread_str: str,
+    asset_name: str,
+    account_type: str,
+    ai_signal_direction: Optional[str] = None # NEW PARAMETER: AI signal direction (e.g., "BUY", "SELL", "HOLD")
 ):
     # --- START OF FIX: Initialize all returnable variables at the top ---
     # การกำหนดค่าเริ่มต้นทั้งหมดไว้ที่นี่ จะช่วยป้องกัน UnboundLocalError ได้ 100%
@@ -48,6 +52,16 @@ def calculate_fibo_trade_plan(
         num_selected = sum(fibo_flags_selected)
         if num_selected == 0: raise ValueError("กรุณาเลือก Fibo Level อย่างน้อยหนึ่งระดับ")
 
+        # Determine the effective direction for the trade plan
+        # Prioritize AI signal if it's a valid BUY or SELL signal
+        effective_direction = direction # Start with the user-selected direction
+        if ai_signal_direction and ai_signal_direction.upper() in ["BUY", "SELL"]:
+            effective_direction = ai_signal_direction.upper() # Use AI signal if actionable
+            print(f"Using AI signal direction: {effective_direction}")
+        else:
+            print(f"Using user-selected direction: {effective_direction}")
+
+
         # Main Calculations
         total_risk_dollar = current_active_balance * (risk_pct_fibo_input / 100.0)
         risk_per_leg = total_risk_dollar / num_selected
@@ -56,10 +70,11 @@ def calculate_fibo_trade_plan(
         fibo_prices_short = [high_fibo - range_fibo * lvl for lvl in fibo_levels_definitions]
 
         # TP prices are now calculated inside the 'try' block after validation passes
+        # Use effective_direction here
         tp_prices = {
-            'TP1': (high_fibo + range_fibo * (settings.RATIO_TP1_EFF - 1)) if direction=="Long" else (low_fibo - range_fibo * (settings.RATIO_TP1_EFF - 1)),
-            'TP2': (high_fibo + range_fibo * (settings.RATIO_TP2_EFF - 1)) if direction=="Long" else (low_fibo - range_fibo * (settings.RATIO_TP2_EFF - 1)),
-            'TP3': (high_fibo + range_fibo * (settings.RATIO_TP3_EFF - 1)) if direction=="Long" else (low_fibo - range_fibo * (settings.RATIO_TP3_EFF - 1)),
+            'TP1': (high_fibo + range_fibo * (settings.RATIO_TP1_EFF - 1)) if effective_direction=="BUY" else (low_fibo - range_fibo * (settings.RATIO_TP1_EFF - 1)),
+            'TP2': (high_fibo + range_fibo * (settings.RATIO_TP2_EFF - 1)) if effective_direction=="BUY" else (low_fibo - range_fibo * (settings.RATIO_TP2_EFF - 1)),
+            'TP3': (high_fibo + range_fibo * (settings.RATIO_TP3_EFF - 1)) if effective_direction=="BUY" else (low_fibo - range_fibo * (settings.RATIO_TP3_EFF - 1)),
         }
         
         selected_idxs = [i for i, f in enumerate(fibo_flags_selected) if f]
@@ -67,7 +82,7 @@ def calculate_fibo_trade_plan(
         for fibo_idx in selected_idxs:
             current_fibo_level = fibo_levels_definitions[fibo_idx]
             
-            if direction == "Long":
+            if effective_direction == "BUY": # Use effective_direction here
                 entry_price = fibo_prices_long[fibo_idx]
                 if current_fibo_level <= 0.382: sl_base = low_fibo
                 else:
@@ -76,7 +91,7 @@ def calculate_fibo_trade_plan(
                     elif current_selection_index == 1: sl_base = (fibo_prices_long[selected_idxs[0]] + low_fibo) / 2
                     else: sl_base = (fibo_prices_long[selected_idxs[current_selection_index - 1]] + fibo_prices_long[selected_idxs[current_selection_index - 2]]) / 2
                 sl_price = sl_base - spread
-            else: # Short
+            else: # SELL (Use effective_direction here)
                 entry_price = fibo_prices_short[fibo_idx]
                 if current_fibo_level <= 0.382: sl_base = high_fibo
                 else:
@@ -102,8 +117,8 @@ def calculate_fibo_trade_plan(
                 profit, rr = 0.0, 0.0
                 if stop_dist > 1e-9:
                     dist = abs(target_price - entry_price)
-                    is_valid_tp = (direction=="Long" and target_price > entry_price) or \
-                                  (direction=="Short" and target_price < entry_price)
+                    is_valid_tp = (effective_direction=="BUY" and target_price > entry_price) or \
+                                  (effective_direction=="SELL" and target_price < entry_price)
                     if is_valid_tp:
                         profit = lot * dist
                         rr = dist / stop_dist
@@ -114,12 +129,13 @@ def calculate_fibo_trade_plan(
             extension_results[fibo_level_str] = {}
             extension_ratios = [1.618, 2.618, 4.326]
             for ratio in extension_ratios:
-                ext_price = (high_fibo + range_fibo * (ratio - 1)) if direction == "Long" else (low_fibo - range_fibo * (ratio - 1))
+                # Use effective_direction here
+                ext_price = (high_fibo + range_fibo * (ratio - 1)) if effective_direction == "BUY" else (low_fibo - range_fibo * (ratio - 1))
                 extension_prices[fibo_level_str][str(ratio)] = round(ext_price, 5)
                 ext_profit, ext_rr = 0.0, 0.0
                 if stop_dist > 1e-9:
                     ext_dist = abs(ext_price - entry_price)
-                    if (direction=="Long" and ext_price > entry_price) or (direction=="Short" and ext_price < entry_price):
+                    if (effective_direction=="BUY" and ext_price > entry_price) or (effective_direction=="SELL" and ext_price < entry_price):
                         ext_profit = lot * ext_dist
                         ext_rr = ext_dist / stop_dist
                 extension_results[fibo_level_str][str(ratio)] = {'profit': round(ext_profit, 2), 'avg_rr': round(ext_rr, 2)}
@@ -136,7 +152,8 @@ def calculate_fibo_trade_plan(
         "total_lots": total_lots, "total_risk_dollar": total_risk_dollar_calculated,
         "results_by_tp": results_by_tp, "tp_prices": tp_prices, "entry_data": entry_data_list,
         "extension_prices": extension_prices, "extension_results": extension_results,
-        "direction": direction, "error_message": error_message,
+        "direction": effective_direction, # Ensure this reflects the AI override if any
+        "error_message": error_message,
     }
 
 
@@ -188,8 +205,8 @@ def calculate_custom_trade_plan(
                         profit = lot * dist_tp
                         temp_rr_list.append(rr)
                         total_profit_at_primary_tp += profit
-            else:
-                lot, risk, rr, profit = 0.0, risk_per_leg, 0.0, 0.0
+                else:
+                    lot, risk, rr, profit = 0.0, risk_per_leg, 0.0, 0.0
 
             if entry_val > sl_val: long_count += 1
             elif entry_val < sl_val: short_count += 1

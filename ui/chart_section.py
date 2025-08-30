@@ -1,95 +1,113 @@
 # ui/chart_section.py
+
 import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from core.supabase_handler import SupabaseHandler # แก้ไข: Import คลาส SupabaseHandler แทนการ import ฟังก์ชันโดยตรง
 
-def render_chart_section():
+# NEW: สร้างและ cache SupabaseHandler object เพื่อใช้ในส่วนนี้โดยเฉพาะ
+@st.cache_resource
+def get_db_handler_for_chart():
+    return SupabaseHandler()
+
+def render_chart_section(df_portfolios: pd.DataFrame):
     """
-    Renders the TradingView chart visualizer in the main area.
-    Corresponds to 'SEC ??: MAIN AREA - CHART VISUALIZER' of main (1).py.
+    Renders the chart visualization section.
     """
-    with st.expander("📈 Chart Visualizer", expanded=False):
-        Symbol_to_display_default = "OANDA:XAUUSD" # Default Symbol
-        Symbol_to_display = Symbol_to_display_default
-        info_source = "ค่าเริ่มต้น"
+    st.markdown("---")
+    st.subheader("📈 Trade Chart Visualization")
 
-        # Determine Symbol based on current mode's input or plot_data from log viewer
-        current_mode = st.session_state.get("mode")
-        current_Symbol_input_from_mode = ""
+    # Ensure current_portfolio_id is in session state
+    if 'current_portfolio_id' not in st.session_state or not st.session_state['current_portfolio_id']:
+        st.info("Please select or create a Portfolio in the sidebar to view charts.")
+        return
 
-        if current_mode == "FIBO":
-            current_Symbol_input_from_mode = st.session_state.get("Symbol_fibo_val_v2", "XAUUSD")
-            info_source = f"Input ปัจจุบัน (FIBO: {current_Symbol_input_from_mode})"
-        elif current_mode == "CUSTOM":
-            current_Symbol_input_from_mode = st.session_state.get("Symbol_custom_val_v2", "XAUUSD")
-            info_source = f"Input ปัจจุบัน (CUSTOM: {current_Symbol_input_from_mode})"
-        else: # No mode or other mode, use default or plot_data
-            info_source = "Input ปัจจุบัน (ยังไม่ได้เลือกโหมด)"
+    current_portfolio_id = st.session_state['current_portfolio_id']
+    current_portfolio_name = st.session_state['current_portfolio_name']
 
+    st.markdown(f"**Viewing Charts for Portfolio:** `{current_portfolio_name}` (`{current_portfolio_id}`)")
 
-        # Override with plot_data if it exists (from Log Viewer)
-        if 'plot_data' in st.session_state and st.session_state['plot_data']:
-            Symbol_from_log = st.session_state['plot_data'].get('Symbol')
-            if Symbol_from_log: # Check if 'Symbol' key exists and has a value
-                current_Symbol_input_from_mode = Symbol_from_log # Prioritize Symbol from log
-                info_source = f"Log Viewer ({current_Symbol_input_from_mode})"
-        
-        # Normalize the Symbol symbol for TradingView
-        if current_Symbol_input_from_mode: # If any Symbol string is determined
-            Symbol_upper = current_Symbol_input_from_mode.upper()
-            if Symbol_upper == "XAUUSD":
-                Symbol_to_display = "OANDA:XAUUSD"
-            elif Symbol_upper == "EURUSD":
-                Symbol_to_display = "OANDA:EURUSD"
-            # Add more common mappings if needed, e.g., BTCUSD, OIL, etc.
-            # For example:
-            # elif Symbol_upper == "GBPUSD":
-            #     Symbol_to_display = "OANDA:GBPUSD"
-            # elif "USD" in Symbol_upper and len(Symbol_upper) == 6: # Basic check for FX pairs
-            #     # Attempt to prefix with OANDA if it's a common FX structure
-            #     # This might need a more robust check or a predefined list
-            #     Symbol_to_display = f"OANDA:{Symbol_upper}"
-            else:
-                # For other symbols, try using them directly or allow user to specify prefix
-                # For now, use directly as per original logic if not XAUUSD/EURUSD
-                Symbol_to_display = Symbol_upper
-        else: # Fallback if no Symbol determined from mode or log
-            Symbol_to_display = Symbol_to_display_default
-            info_source = "ค่าเริ่มต้น"
+    # NEW: เรียกใช้ db_handler object ที่สร้างไว้
+    db_handler = get_db_handler_for_chart()
 
+    # NEW: ใช้ db_handler object เพื่อเรียก method load_actual_trades() และ load_planned_trade_logs()
+    df_actual_trades = db_handler.load_actual_trades(portfolio_id=current_portfolio_id)
+    df_planned_logs = db_handler.load_planned_trade_logs(portfolio_id=current_portfolio_id)
 
-        st.info(f"แสดงกราฟ TradingView สำหรับ: **{Symbol_to_display}** (จาก: {info_source})")
+    # Convert date columns to datetime objects for plotting
+    if not df_actual_trades.empty and 'CloseTime' in df_actual_trades.columns:
+        df_actual_trades['CloseTime'] = pd.to_datetime(df_actual_trades['CloseTime'])
+    if not df_planned_logs.empty and 'TradeDate' in df_planned_logs.columns:
+        df_planned_logs['TradeDate'] = pd.to_datetime(df_planned_logs['TradeDate'])
 
-        # TradingView Widget HTML (same as original)
-        # Ensure locale is 'en' for broader compatibility or 'th' if preferred and supported well.
-        tradingview_html = f"""
-        <div class="tradingview-widget-container" style="height:100%;width:100%">
-          <div id="tradingview_widget_chart" style="height:calc(100% - 32px);width:100%"></div>
-          <div class="tradingview-widget-copyright">
-            <a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank">
-              <span class="blue-text">Track all markets on TradingView</span>
-            </a>
-          </div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-          new TradingView.widget(
-          {{
-            "width": "100%",
-            "height": 600,
-            "symbol": "{Symbol_to_display}",
-            "interval": "15",
-            "timezone": "Asia/Bangkok",
-            "theme": "dark",
-            "style": "1",
-            "locale": "th", 
-            "enable_publishing": false,
-            "withdateranges": true,
-            "hide_side_toolbar": false,
-            "allow_symbol_change": true,
-            "details": true,
-            "hotlist": true,
-            "calendar": true,
-            "container_id": "tradingview_widget_chart"
-          }});
-          </script>
-        </div>
-        """
-        st.components.v1.html(tradingview_html, height=620)
+    # --- Plotting Net Profit Over Time (from Actual Trades) ---
+    st.markdown("#### Net Profit Over Time (Actual Trades)")
+    if not df_actual_trades.empty:
+        # Calculate cumulative net profit
+        df_actual_trades = df_actual_trades.sort_values(by='CloseTime')
+        df_actual_trades['CumulativeNetProfit'] = df_actual_trades['Profit'].cumsum()
+
+        fig_profit = go.Figure()
+        fig_profit.add_trace(go.Scatter(
+            x=df_actual_trades['CloseTime'],
+            y=df_actual_trades['CumulativeNetProfit'],
+            mode='lines+markers',
+            name='Cumulative Net Profit',
+            line=dict(color='green')
+        ))
+        fig_profit.update_layout(
+            title='Cumulative Net Profit Over Time',
+            xaxis_title='Date',
+            yaxis_title='Net Profit',
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig_profit, use_container_width=True)
+    else:
+        st.info("No actual trade data available for this portfolio to plot net profit.")
+
+    # --- Plotting Trade Outcomes (Win/Loss Ratio) ---
+    st.markdown("#### Trade Outcomes (Actual Trades)")
+    if not df_actual_trades.empty:
+        win_count = df_actual_trades[df_actual_trades['Profit'] > 0].shape[0]
+        loss_count = df_actual_trades[df_actual_trades['Profit'] <= 0].shape[0] # Consider zero profit as non-win
+
+        labels = ['Wins', 'Losses']
+        values = [win_count, loss_count]
+        colors = ['#28a745', '#dc3545'] # Green for wins, Red for losses
+
+        fig_pie = go.Figure(data=[go.Pie(labels=labels, values=values, marker_colors=colors, hole=.3)])
+        fig_pie.update_layout(title_text='Win/Loss Ratio')
+        st.plotly_chart(fig_pie, use_container_width=True)
+    else:
+        st.info("No actual trade data available for this portfolio to plot trade outcomes.")
+
+    # --- Plotting Planned vs. Actual Trades (Example - by Symbol) ---
+    st.markdown("#### Planned vs. Actual Trades (by Symbol)")
+    if not df_planned_logs.empty or not df_actual_trades.empty:
+        # Count planned trades per symbol
+        planned_counts = df_planned_logs['Symbol'].value_counts().reset_index()
+        planned_counts.columns = ['Symbol', 'PlannedCount']
+
+        # Count actual trades per symbol
+        actual_counts = df_actual_trades['Symbol'].value_counts().reset_index()
+        actual_counts.columns = ['Symbol', 'ActualCount']
+
+        # Merge data
+        merged_counts = pd.merge(planned_counts, actual_counts, on='Symbol', how='outer').fillna(0)
+
+        fig_bar = go.Figure(data=[
+            go.Bar(name='Planned Trades', x=merged_counts['Symbol'], y=merged_counts['PlannedCount'], marker_color='skyblue'),
+            go.Bar(name='Actual Trades', x=merged_counts['Symbol'], y=merged_counts['ActualCount'], marker_color='orange')
+        ])
+        fig_bar.update_layout(
+            barmode='group',
+            title='Planned vs. Actual Trades by Symbol',
+            xaxis_title='Symbol',
+            yaxis_title='Number of Trades'
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+    else:
+        st.info("No planned or actual trade data available for this portfolio to compare.")
+
+    st.markdown("---")
+    st.info("More chart visualizations coming soon!")

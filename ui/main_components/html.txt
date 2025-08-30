@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Trading Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --font-family: 'Inter', sans-serif; --bg-color: transparent;
+            --card-bg-yellow: #fffbeb; --card-border-yellow: #fde68a; --text-color-yellow: #92400e;
+            --card-bg-teal: #f0fdfa; --card-border-teal: #a7f3d0; --text-color-teal: #0f766e;
+            --card-bg-blue: #eef2ff; --card-border-blue: #c7d2fe; --text-color-blue: #3730a3;
+            --text-color-primary: #1f2937; --text-color-secondary: #6b7280; --border-radius: 12px;
+            --color-green: #16a34a; --color-red: #dc2626; --color-blue-info: #2563eb;
+        }
+        body { font-family: var(--font-family); background-color: var(--bg-color); color: var(--text-color-primary); margin: 0; padding: 10px; }
+        .dashboard-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+        .status-badge { font-size: 0.8em; padding: 4px 8px; border-radius: 99px; background-color: #dcfce7; color: #166534; font-weight: 500; }
+        .main-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .stat-card { padding: 20px; border-radius: var(--border-radius); border: 1px solid; }
+        .stat-card h4 { margin: 0 0 5px 0; font-size: 1em; font-weight: 500; color: var(--text-color-secondary); }
+        .stat-card .value { font-size: 2em; font-weight: 700; margin: 0 0 15px 0; }
+        .stat-card .value-small { font-size: 1.2em; font-weight: 600; }
+        .progress-bar { width: 100%; height: 8px; background-color: #e5e7eb; border-radius: 99px; position: relative; overflow: hidden; }
+        .progress-bar-thumb { width: 16px; height: 16px; background-color: white; border: 3px solid; border-radius: 50%; position: absolute; top: -4px; transform: translateX(-50%); transition: left 0.3s ease-in-out; }
+        .progress-labels { display: flex; justify-content: space-between; font-size: 0.75em; margin-top: 5px; color: var(--text-color-secondary); }
+        .yellow { background-color: var(--card-bg-yellow); border-color: var(--card-border-yellow); } .yellow .value { color: var(--text-color-yellow); } .yellow .progress-bar-thumb { border-color: #facc15; }
+        .teal { background-color: var(--card-bg-teal); border-color: var(--card-border-teal); } .teal .value { color: var(--text-color-teal); } .teal .progress-bar-thumb { border-color: #2dd4bf; }
+        .blue { background-color: var(--card-bg-blue); border-color: var(--card-border-blue); } .blue .value { color: var(--text-color-blue); }
+        .details-expander { margin-top: 20px; }
+        .details-content { padding: 15px; border: 1px solid #e5e7eb; border-radius: var(--border-radius); background-color: #f9fafb; }
+        .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; }
+        .metric-card { text-align: center; }
+        .metric-label { font-size: 0.9em; color: var(--text-color-secondary); }
+        .metric-value { font-size: 1.5em; font-weight: 600; }
+        .metric-label.sub-value, .metric-value .sub-value { font-size: 0.7em; color: var(--text-color-secondary); font-weight: 500; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.9em; }
+        th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        th { font-weight: 600; }
+        #notification-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; width: 320px; }
+        .notification-toast { background-color: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-left: 5px solid; display: flex; align-items: center; gap: 15px; animation: slideInRight .3s ease-out; opacity: 1; transition: opacity .3s ease, transform .3s ease; }
+        .notification-toast.fade-out { opacity: 0; transform: translateX(100%); }
+        .notification-toast .icon { font-size: 24px; }
+        .notification-toast .content .title { font-weight: 600; margin-bottom: 4px; }
+        .notification-toast .content .message { font-size: 0.9em; color: #6b7280; }
+        .notification-toast.success { border-color: var(--color-green); } .notification-toast.success .icon { color: var(--color-green); }
+        .notification-toast.error { border-color: var(--color-red); } .notification-toast.error .icon { color: var(--color-red); }
+        .notification-toast.info { border-color: var(--color-blue-info); } .notification-toast.info .icon { color: var(--color-blue-info); }
+        @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .tab-menu { display: flex; gap: 5px; border-bottom: 2px solid #e5e7eb; margin-bottom: 20px; }
+        .tab-button { padding: 10px 20px; cursor: pointer; border: none; background-color: transparent; font-size: 1em; font-weight: 500; color: var(--text-color-secondary); border-bottom: 3px solid transparent; transition: all .2s ease-in-out; }
+        .tab-button:hover { background-color: #f9fafb; }
+        .tab-button.active { color: var(--color-blue-info); border-bottom-color: var(--color-blue-info); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+        .form-grid label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            font-weight: 500;
+            color: var(--text-color-secondary);
+        }
+        .form-grid input, .form-grid select, #plan-notes {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            box-sizing: border-box; /* สำคัญมาก */
+            font-family: var(--font-family);
+            font-size: 0.95em;
+        }
+        #plan-notes {
+            resize: vertical;
+        }
+        .action-button-primary {
+            padding: 10px 18px;
+            border-radius: 5px;
+            border: none;
+            background-color: var(--color-blue-info);
+            color: white;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        .action-button-primary:hover {
+            background-color: #1d4ed8;
+        }
+        .action-button-secondary {
+            padding: 10px 18px;
+            border-radius: 5px;
+            border: 1px solid #d1d5db;
+            background-color: #fff;
+            color: var(--text-color-primary);
+            cursor: pointer;
+            font-weight: 500;
+            margin-right: 10px;
+            transition: background-color 0.2s;
+        }
+        .action-button-secondary:hover {
+            background-color: #f9fafb;
+        .suggestion-text {
+            font-size: 0.8em;
+            font-weight: 500;
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 6px;
+            display: none; /* Hidden by default */
+        }
+        .suggestion-text.success {
+            background-color: #dcfce7; /* green */
+            color: #166534;
+        }
+        .suggestion-text.error {
+            background-color: #fee2e2; /* red */
+            color: #991b1b;
+        }
+        .stat-card .value.breached {
+            color: var(--color-red) !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="notification-container"></div>
+    <div id="main-content" style="display: none;">
+        <div class="tab-menu">
+            <button class="tab-button active" onclick="openTab(event, 'Dashboard')">📊 Live Dashboard</button>
+            <button class="tab-button" onclick="openTab(event, 'PortfolioManagement')">💼 Portfolio & Data Management</button>
+            <button class="tab-button" onclick="openTab(event, 'PlannedTrades')">📝 Planned Trades</button>
+            <button class="tab-button" onclick="openTab(event, 'AiInsights')">💡 AI Insights</button>
+        </div>
+        <div id="Dashboard" class="tab-content active">
+            <div class="dashboard-header"><h2 id="portfolio-title"></h2><span id="portfolio-status"></span></div>
+            <div class="main-grid">
+                <div class="stat-card yellow">
+                    <h4>Profit Target</h4>
+                    <div class="value" id="profit-value">$- / $-</div>
+                    <div class="progress-bar"><!-- ... --></div>
+                    <div class="progress-labels"><!-- ... --></div>
+                    <div class="suggestion-text" id="profit-suggestion"></div>
+                <div class="stat-card teal">
+                    <h4>Daily Loss Level</h4>
+                    <div class="value" id="loss-left-value">$0 left</div>
+                    <div class="progress-bar"><!-- ... --></div>
+                    <div class="progress-labels"><!-- ... --></div>
+                    <div class="suggestion-text" id="loss-suggestion"></div>
+                <div class="stat-card blue"><h4>Open Positions</h4><div class="value" id="positions-total">0 Open</div><div class="value-small" id="positions-summary">0W / 0L</div></div>
+            </div>
+            <details class="details-expander" open><summary style="font-weight: 500;">Today's Performance Analytics</summary><div class="details-content"><div class="metric-grid"><div class="metric-card"><div class="metric-label">Win Rate</div><div class="metric-value" id="stat-win-rate"></div></div><div class="metric-card"><div class="metric-label">Profit Factor</div><div class="metric-value" id="stat-profit-factor"></div></div><div class="metric-card"><div class="metric-label">Avg. Winning Trade</div><div class="metric-value" id="stat-avg-win"></div></div><div class="metric-card"><div class="metric-label">Avg. Losing Trade</div><div class="metric-value" id="stat-avg-loss"></div></div></div></div></details>
+            <details class="details-expander" open><summary style="font-weight: 500;">Detailed Live Status & Orders</summary><div class="details-content"><div class="metric-grid"><div class="metric-card"><div class="metric-label">Equity</div><div class="metric-value" id="detail-equity"></div></div><div class="metric-card"><div class="metric-label">Floating P/L</div><div class="metric-value" id="detail-pl"></div></div><div class="metric-card"><div class="metric-label">Balance</div><div class="metric-value" id="detail-balance"></div></div><div class="metric-card"><div class="metric-label">Total Open Risk</div><div class="metric-value" id="detail-risk"></div></div><div class="metric-card"><div class="metric-label">Avg. R:R</div><div class="metric-value" id="detail-rr"></div></div></div><h4 style="margin-top: 20px;">Open Positions</h4><table><thead><tr><th>Ticket</th><th>Symbol</th><th>Type</th><th>Volume</th><th>Price</th><th>Profit</th><th>Risk ($)</th><th>R:R</th></tr></thead><tbody id="positions-table"></tbody></table><h4 style="margin-top: 20px;">Pending Orders</h4><table><thead><tr><th>Ticket</th><th>Time</th><th>Symbol</th><th>Type</th><th>Lots</th><th>Entry Price</th><th>SL</th><th>TP</th></tr></thead><tbody id="pending-orders-table"></tbody></table></div></details>
+            <details class="details-expander" open><summary style="font-weight: 500;">Today's Trade History</summary><div class="details-content"><div class="metric-card" style="text-align: left;"><div class="metric-label">Today's Realized P/L</div><div class="metric-value" id="realized-pl-today"></div></div><table><thead><tr><th>Close Time</th><th>Symbol</th><th>Type</th><th>Volume</th><th>Close Price</th><th>Profit</th><th>Comment</th></tr></thead><tbody id="history-table"></tbody></table></div></details>
+        </div>
+        <div id="PortfolioManagement" class="tab-content">
+            <h2>💼 Portfolio & Data Management</h2>
+            <div class="details-expander" style="margin-top: 20px;"><div class="details-content"><h4 style="margin-top: 0; font-weight: 500;">Upload New Statement</h4><p style="color: var(--text-color-secondary); margin-top: 0;">Select a portfolio and upload the corresponding MT5 statement file (.csv format required).</p><select id="portfolio-select-for-upload" style="padding: 8px; border-radius: 5px; min-width: 200px; margin-right: 10px;"><option value="">Select a Portfolio...</option></select><input type="file" id="statement-file-input" accept=".html" style="margin-right: 10px;"><button id="upload-button" style="padding: 8px 15px; border-radius: 5px; border: none; background-color: var(--color-blue-info); color: white; cursor: pointer; font-weight: 500;">Upload Statement</button><div id="upload-status" style="margin-top: 15px; font-weight: 500;"></div></div></div>
+            <div id="portfolio-list-container" style="margin-top: 20px;"></div>
+        </div>
+        <!-- 4. "กล่อง" สำหรับหน้า Planned Trades -->
+    <div id="PlannedTrades" class="tab-content">
+    <h2>📝 Planned Trades</h2>
+    <div style="display: flex; gap: 30px;">
+        
+            <!-- START: ส่วนฟอร์มสำหรับกรอกข้อมูล -->
+            <div style="flex: 1;">
+                <div class="details-expander">
+                    <div class="details-content">
+                        <h4 style="margin-top: 0; font-weight: 500;">Create New Trade Plan</h4>
+                        
+                        <div class="form-grid">
+                            <!-- แถวที่ 1: Portfolio & Asset -->
+                            <div>
+                                <label for="plan-portfolio">Portfolio</label>
+                                <select id="plan-portfolio"></select>
+                            </div>
+                            <div>
+                                <label for="plan-asset">Asset</label>
+                                <input type="text" id="plan-asset" value="XAUUSDc">
+                            </div>
+
+                            <!-- แถวที่ 2: Direction & Entry -->
+                            <div>
+                                <label for="plan-direction">Direction</label>
+                                <select id="plan-direction">
+                                    <option value="Buy">Buy</option>
+                                    <option value="Sell">Sell</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="plan-entry">Entry Price</label>
+                                <input type="number" id="plan-entry" placeholder="e.g., 1850.50">
+                            </div>
+
+                            <!-- แถวที่ 3: Stop Loss & Take Profit -->
+                            <div>
+                                <label for="plan-sl">Stop Loss</label>
+                                <input type="number" id="plan-sl" placeholder="e.g., 1840.25">
+                            </div>
+                            <div>
+                                <label for="plan-tp">Take Profit</label>
+                                <input type="number" id="plan-tp" placeholder="e.g., 1875.00">
+                            </div>
+                            
+                            <!-- แถวที่ 4: Risk -->
+                            <div>
+                                <label for="plan-risk-percent">Risk (%)</label>
+                                <input type="number" id="plan-risk-percent" value="1.0" step="0.1">
+                            </div>
+                            <div>
+                                <label for="plan-lot-size">Suggested Lot Size</label>
+                                <input type="text" id="plan-lot-size" readonly style="background-color: #e9ecef;">
+                            </div>
+                        </div>
+
+                        <!-- Notes -->
+                        <div style="margin-top: 15px;">
+                            <label for="plan-notes">Trade Notes / Strategy</label>
+                            <textarea id="plan-notes" rows="4"></textarea>
+                        </div>
+                        
+                        <!-- ปุ่ม -->
+                        <div style="margin-top: 20px; text-align: right;">
+                            <button id="calculate-lot-button" class="action-button-secondary">Calculate Lot</button>
+                            <button id="save-plan-button" class="action-button-primary">Save Trade Plan</button>
+                        </div>
+                        <div id="plan-status" style="margin-top: 10px; text-align: right; font-weight: 500;"></div>
+
+                    </div>
+                </div>
+            </div>
+            <!-- END: ส่วนฟอร์ม -->
+
+            <!-- START: ส่วนแสดงรายการแผน -->
+            <div style="flex: 2;">
+                <div class="details-expander">
+                    <div class="details-content">
+                        <h4 style="margin-top: 0; font-weight: 500;">Pending Trade Plans</h4>
+                        <div id="planned-trades-list">
+                            <!-- รายการแผนการเทรดจะถูกแสดงที่นี่ -->
+                            <p style="color: var(--text-color-secondary);">No trade plans saved yet.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- END: ส่วนแสดงรายการแผน -->
+        </div>
+    </div>
+        <div id="AiInsights" class="tab-content">
+    <h2>💡 AI Insights from Statement</h2>
+
+    <!-- ส่วนสำหรับอัปโหลดไฟล์ -->
+    <div class="details-expander">
+        <div class="details-content">
+            <p style="color: var(--text-color-secondary); margin-top: 0;">Upload an MT5 statement file (.csv) to get a detailed performance analysis.</p>
+            <input type="file" id="analysis-file-input" accept=".html" style="margin-right: 10px;">
+            <button id="analyze-button" class="action-button-primary">Analyze</button>
+            <div id="analysis-status" style="margin-top: 10px; font-weight: 500;"></div>
+        </div>
+    </div>
+
+    <!-- ส่วนสำหรับแสดงผลลัพธ์การวิเคราะห์ -->
+    <div id="analysis-results-container" style="display: none; margin-top: 20px;">
+        <div class="metric-grid" id="analysis-summary-grid">
+            <!-- การ์ดสรุปจะถูกสร้างโดย JavaScript -->
+        </div>
+    </div>
+</div>
+
+    </div>
+    <div id="connection-status" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 1.2em;">Connecting...</div>
+
+    <script>
+        function openTab(evt, tabName) {
+            let i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-content");
+            for (i = 0; i < tabcontent.length; i++) { tabcontent[i].style.display = "none"; }
+            tablinks = document.getElementsByClassName("tab-button");
+            for (i = 0; i < tablinks.length; i++) { tablinks[i].className = tablinks[i].className.replace(" active", ""); }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+        
+        const ws = new WebSocket("ws://localhost:5555");
+        
+        function formatCurrency(v, d=2) { return '$' + (v || 0).toLocaleString('en-US', { minimumFractionDigits:d, maximumFractionDigits:d }); }
+        
+        function updateProgressBar(id, val, min, max) {
+            if (!id || val === undefined || min === undefined || max === undefined) return;
+            const range = max - min;
+            let pct = (range > 0) ? ((val - min) / range) * 100 : (val >= max ? 100 : 0);
+            const thumb = document.getElementById(id);
+            if (thumb) thumb.style.left = `${Math.max(0, Math.min(100, pct))}%`;
+        }
+
+        function showNotification({ type = 'info', title, message, duration = 7000 }) {
+            const container = document.getElementById('notification-container');
+            const icons = { success: '✅', error: '❌', info: '🔔' };
+            const toast = document.createElement('div');
+            toast.className = `notification-toast ${type}`;
+            toast.innerHTML = `<div class="icon">${icons[type] || ''}</div><div class="content"><div class="title">${title}</div><div class="message">${message}</div></div>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.add('fade-out');
+                toast.addEventListener('transitionend', () => toast.remove());
+            }, duration);
+        }
+
+        function setupUploadFunctionality() {
+            const uploadButton = document.getElementById('upload-button');
+            const portfolioSelect = document.getElementById('portfolio-select-for-upload');
+            const fileInput = document.getElementById('statement-file-input');
+            const uploadStatus = document.getElementById('upload-status');
+
+            if (uploadButton && !uploadButton.listenerAttached) {
+                uploadButton.addEventListener('click', async () => {
+                    const file = fileInput.files[0];
+                    if (!portfolioSelect.value || !file) {
+                        uploadStatus.textContent = '❌ Please select portfolio and file.';
+                        uploadStatus.style.color = 'var(--color-red)';
+                        return;
+                    }
+                    uploadStatus.textContent = 'Uploading...';
+                    const formData = new FormData();
+                    formData.append('statementFile', file);
+                    formData.append('portfolioName', portfolioSelect.value);
+                    try {
+                        const response = await fetch('http://localhost:5001/upload', { method: 'POST', body: formData });
+                        const result = await response.json();
+                        uploadStatus.textContent = response.ok ? `✅ ${result.message}` : `❌ ${result.message}`;
+                        uploadStatus.style.color = response.ok ? 'var(--color-green)' : 'var(--color-red)';
+                    } catch (error) {
+                        uploadStatus.textContent = '❌ Network Error.';
+                        uploadStatus.style.color = 'var(--color-red)';
+                    }
+                });
+                uploadButton.listenerAttached = true;
+            }
+        }
+
+        ws.onopen = () => { document.getElementById('connection-status').textContent = '✅ Connected. Waiting for data...'; };
+        ws.onclose = () => { document.getElementById('connection-status').innerHTML = '<span style="color:red;">❌ Disconnected. Restart service.</span>'; document.getElementById('main-content').style.display = 'none';};
+        ws.onerror = (err) => { document.getElementById('connection-status').innerHTML = '<span style="color:red;">❌ Connection Error. Is backend running?</span>'; document.getElementById('main-content').style.display = 'none';};
+
+        ws.onmessage = (event) => {
+            try {
+                if (document.getElementById('main-content').style.display === 'none') {
+                    document.getElementById('connection-status').style.display = 'none';
+                    document.getElementById('main-content').style.display = 'block';
+                }
+                const data = JSON.parse(event.data);
+                if (!data || !data.account_id) return;
+
+                const ctx = data.portfolio_context;
+                const stats = data.performance_analytics;
+                
+                document.getElementById('portfolio-title').textContent = `#${data.account_id} - ${ctx.portfolio_name || 'Unlinked'}`;
+                document.getElementById('portfolio-status').textContent = ctx.portfolio_name ? 'Active' : 'Unlinked';
+
+                const openPositions = data.open_positions || [];
+                document.getElementById('positions-total').textContent = `${openPositions.length} Open`;
+                document.getElementById('positions-summary').textContent = `${openPositions.filter(p=>p.Profit>0).length}W / ${openPositions.filter(p=>p.Profit<0).length}L`;
+
+                if (ctx && ctx.initial_balance > 0) {
+                    const profitTarget = ctx.initial_balance * (ctx.profit_target_pct / 100);
+                    const currentProfit = data.daily_net_pl;
+                    const stopoutLevel = ctx.initial_balance * (1 - (ctx.total_stopout_pct / 100));
+                    document.getElementById('profit-value').textContent = `${formatCurrency(currentProfit)} / ${formatCurrency(profitTarget)}`;
+                    document.getElementById('profit-stopout-label').textContent = `Stopout: ${formatCurrency(stopoutLevel)}`;
+                    document.getElementById('profit-target-label').textContent = `Target: ${formatCurrency(ctx.initial_balance + profitTarget)}`;
+                    updateProgressBar('profit-thumb', data.equity, stopoutLevel, ctx.initial_balance + profitTarget);
+                    const dailyLossLimitEquity = ctx.opening_balance * (1 - (ctx.daily_loss_limit_pct / 100));
+                    const lossLeft = data.equity - dailyLossLimitEquity;
+                    document.getElementById('loss-left-value').textContent = `${formatCurrency(lossLeft)} left`;
+                    document.getElementById('loss-limit-label').textContent = `Limit: ${formatCurrency(dailyLossLimitEquity)}`;
+                    document.getElementById('loss-start-label').textContent = `Start: ${formatCurrency(ctx.opening_balance)}`;
+                    updateProgressBar('loss-thumb', data.equity, dailyLossLimitEquity, ctx.opening_balance);
+                }
+
+                document.getElementById('stat-win-rate').innerHTML = `${(stats.win_rate || 0).toFixed(2)}% <span class="metric-label sub-value">(${stats.winning_trades}W / ${stats.losing_trades}L)</span>`;
+                document.getElementById('stat-profit-factor').textContent = stats.profit_factor === 'Infinity' ? '∞' : (stats.profit_factor || 0).toFixed(2);
+                document.getElementById('stat-avg-win').textContent = formatCurrency(stats.average_win);
+                document.getElementById('stat-avg-loss').textContent = formatCurrency(stats.average_loss);
+
+                document.getElementById('detail-equity').textContent = formatCurrency(data.equity);
+                document.getElementById('detail-pl').textContent = formatCurrency(data.floating_pl);
+                document.getElementById('detail-balance').textContent = formatCurrency(data.balance);
+                document.getElementById('detail-risk').textContent = formatCurrency(data.total_open_risk);
+                document.getElementById('detail-rr').textContent = (data.avg_rr || 0).toFixed(2);
+
+                const positionsTable = document.getElementById('positions-table');
+                positionsTable.innerHTML = openPositions.length ? openPositions.map(p => `<tr><td>${p.Ticket}</td><td>${p.Symbol}</td><td>${p.Type}</td><td>${p.Volume}</td><td>${p.Price.toFixed(5)}</td><td style="color:${p.Profit >= 0 ? 'green':'red'}">${formatCurrency(p.Profit)}</td><td>${formatCurrency(p.position_risk)}</td><td>${(p.position_rr || 0).toFixed(2)}</td></tr>`).join('') : `<tr><td colspan="8" align="center">No open positions.</td></tr>`;
+                const pendingOrders = data.pending_orders || [];
+                const pendingTable = document.getElementById('pending-orders-table');
+                pendingTable.innerHTML = pendingOrders.length ? pendingOrders.map(o => `<tr><td>${o.Ticket}</td><td>${o.Time}</td><td>${o.Symbol}</td><td>${o.Type}</td><td>${(o.Lots||0).toFixed(2)}</td><td>${(o['Entry Price']||0).toFixed(5)}</td><td>${(o.SL||0).toFixed(5)}</td><td>${(o.TP||0).toFixed(5)}</td></tr>`).join('') : `<tr><td colspan="8" align="center">No pending orders.</td></tr>`;
+                const tradeHistory = data.trade_history || [];
+                const historyTable = document.getElementById('history-table');
+                historyTable.innerHTML = tradeHistory.length ? tradeHistory.map(t => `<tr><td>${t['Close Time']}</td><td>${t.Symbol}</td><td>${t.Type}</td><td>${(t.Volume||0).toFixed(2)}</td><td>${(t['Close Price']||0).toFixed(5)}</td><td style="color:${t.Profit >= 0 ? 'green':'red'}">${formatCurrency(t.Profit)}</td><td>${t.Comment}</td></tr>`).join('') : `<tr><td colspan="7" align="center">No closed trades today.</td></tr>`;
+                
+                document.getElementById('realized-pl-today').textContent = formatCurrency(stats.net_profit);
+
+                const portfolioSelect = document.getElementById('portfolio-select-for-upload');
+                if (portfolioSelect && portfolioSelect.options.length <= 1) {
+                    const activePortfolioName = document.getElementById('portfolio-title').textContent.split(' - ')[1];
+                    if (activePortfolioName && activePortfolioName !== 'Unlinked') {
+                        portfolioSelect.innerHTML = `<option value="${activePortfolioName}">${activePortfolioName}</option>`;
+                    }
+                }
+                setupUploadFunctionality();
+
+            } catch (e) { console.error("Error processing message:", e); }
+        };
+        // --- START: เพิ่มโค้ดสำหรับ Trade Planner ---
+
+                // 1. ดึง Element ทั้งหมดของฟอร์ม
+                const planPortfolioSelect = document.getElementById('plan-portfolio');
+                const planAssetInput = document.getElementById('plan-asset');
+                const planDirectionSelect = document.getElementById('plan-direction');
+                const planEntryInput = document.getElementById('plan-entry');
+                const planSlInput = document.getElementById('plan-sl');
+                const planTpInput = document.getElementById('plan-tp');
+                const planRiskInput = document.getElementById('plan-risk-percent');
+                const planLotOutput = document.getElementById('plan-lot-size');
+                const planNotesTextarea = document.getElementById('plan-notes');
+                const calculateLotButton = document.getElementById('calculate-lot-button');
+                const savePlanButton = document.getElementById('save-plan-button');
+                const planStatusDiv = document.getElementById('plan-status');
+
+                let currentBalance = 0; // ตัวแปรสำหรับเก็บ Balance ปัจจุบัน
+                let currentAccountType = 'STANDARD'; // ตัวแปรสำหรับเก็บ Account Type
+
+                // 2. ฟังก์ชันสำหรับคำนวณ Lot Size
+                async function calculateLotSize() {
+                    planStatusDiv.textContent = 'Calculating...';
+                    planStatusDiv.style.color = 'var(--text-color-secondary)';
+                    
+                    try {
+                        const response = await fetch('http://localhost:5001/calculate-lot', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                balance: currentBalance,
+                                risk_percent: parseFloat(planRiskInput.value),
+                                symbol: planAssetInput.value,
+                                entry_price: parseFloat(planEntryInput.value),
+                                sl_price: parseFloat(planSlInput.value),
+                                account_type: currentAccountType
+                            })
+                        });
+
+                        const result = await response.json();
+
+                        if (response.ok) {
+                            planLotOutput.value = result.lot_size;
+                            planStatusDiv.textContent = `Risk Amount: ${formatCurrency(result.risk_amount)}`;
+                            planStatusDiv.style.color = 'var(--color-green)';
+                        } else {
+                            planLotOutput.value = 'Error';
+                            planStatusDiv.textContent = `❌ ${result.message}`;
+                            planStatusDiv.style.color = 'var(--color-red)';
+                        }
+
+                    } catch (error) {
+                        planLotOutput.value = 'Error';
+                        planStatusDiv.textContent = '❌ Network Error. Cannot connect to API.';
+                        planStatusDiv.style.color = 'var(--color-red)';
+                    }
+                }
+
+                // 3. ผูก Event Listener กับปุ่ม
+                if (calculateLotButton) {
+                    calculateLotButton.addEventListener('click', calculateLotSize);
+                }
+
+                // 4. อัปเดต ws.onmessage เพื่อเก็บค่า balance และ account type
+                const existingOnMessage = ws.onmessage;
+                ws.onmessage = (event) => {
+                    existingOnMessage(event); // เรียกใช้ onmessage เดิมก่อน
+                    
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.balance) {
+                            currentBalance = data.balance; // เก็บค่า Balance ล่าสุด
+                        }
+                        if (data.portfolio_context && data.portfolio_context.account_type) {
+                            currentAccountType = data.portfolio_context.account_type; // เก็บ Account Type
+                        }
+
+                        // เติมข้อมูล Portfolio ใน Dropdown ของ Planner
+                        if (planPortfolioSelect && planPortfolioSelect.options.length === 0) {
+                            const activePortfolioName = document.getElementById('portfolio-title').textContent.split(' - ')[1];
+                            if (activePortfolioName && activePortfolioName !== 'Unlinked') {
+                                planPortfolioSelect.innerHTML = `<option value="${activePortfolioName}">${activePortfolioName}</option>`;
+                            }
+                        }
+                        const goalsStatus = data.daily_goals_status;
+                const profitSuggestionEl = document.getElementById('profit-suggestion');
+                const lossSuggestionEl = document.getElementById('loss-suggestion');
+                const lossValueEl = document.getElementById('loss-left-value');
+
+                // Reset styles first
+                profitSuggestionEl.style.display = 'none';
+                lossSuggestionEl.style.display = 'none';
+                lossValueEl.classList.remove('breached');
+
+                if (goalsStatus.loss_limit_status === 'breached') {
+                    lossValueEl.textContent = 'LIMIT HIT!';
+                    lossValueEl.classList.add('breached');
+                    lossSuggestionEl.textContent = goalsStatus.suggestion_text;
+                    lossSuggestionEl.className = 'suggestion-text error';
+                    lossSuggestionEl.style.display = 'block';
+                }
+                else if (goalsStatus.profit_target_status === 'reached') {
+                    // Only show profit suggestion if loss limit is not hit
+                    profitSuggestionEl.textContent = goalsStatus.suggestion_text;
+                    profitSuggestionEl.className = 'suggestion-text success';
+                    profitSuggestionEl.style.display = 'block';
+                }
+                // --- END: New AI Coaching UI Logic ---
+
+            } catch (e) { console.error("Error processing message:", e); }
+        };
+    </script>
+</body>
+</html>
