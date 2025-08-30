@@ -12,7 +12,7 @@ from core.mt5_handler import MT5Handler
 from config import settings
 
 WEBSOCKET_HOST, WEBSOCKET_PORT, CONNECTED_CLIENTS = "localhost", 5555, set()
-SESSION_STATE = { "status": "INITIALIZING", "mt5_account_id": None, "portfolio_id": None, "portfolio_context": None, "opening_balance": 0.0, "session_start_time_utc": None, "suggested_balance": 0.0, "is_resuming_session": False, "symbol_properties": {}, "risk_percent": 0.01 }
+SESSION_STATE = { "status": "INITIALIZING", "mt5_account_id": None, "portfolio_id": None, "portfolio_context": None, "opening_balance": 0.0, "session_start_time_utc": None, "suggested_balance": 0.0, "is_resuming_session": False, "symbol_properties": {}, "risk_percent": 0.01, "subscribed_symbol": "XAUUSD" }
 
 def json_converter(o):
     if isinstance(o, (datetime, pd.Timestamp)): return o.isoformat()
@@ -24,9 +24,15 @@ async def fetch_and_broadcast_data(mt5_handler: MT5Handler, supabase_handler: He
     while True:
         try:
             if SESSION_STATE["status"] == "SESSION_ACTIVE":
+                
+                # --- [FIXED] v0.1.1 Added explicit connection check ---
+                if not mt5.terminal_info():
+                    raise ConnectionError("Connection to MetaTrader 5 terminal has been lost.")
+                # --- End of Fix ---
+
                 account_info = mt5_handler.get_account_info()
                 if not account_info:
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(1) # Sleep briefly and retry
                     continue
                 
                 equity = account_info.get('equity', 0.0)
@@ -51,10 +57,8 @@ async def fetch_and_broadcast_data(mt5_handler: MT5Handler, supabase_handler: He
                 risk_used_today = realized_loss_today + total_open_risk
                 risk_left_today = available_risk - risk_used_today
 
-                # --- [MODIFIED] Added new logic for Daily P/L Calculation ---
                 todays_total_pl = equity - opening_balance
                 todays_total_pl_percent = (todays_total_pl / opening_balance * 100) if opening_balance > 0 else 0.0
-                # --- End of Modification ---
 
                 payload = {
                     "status": "SESSION_ACTIVE",
@@ -67,17 +71,15 @@ async def fetch_and_broadcast_data(mt5_handler: MT5Handler, supabase_handler: He
                     "risk_used": risk_used_today,
                     "risk_left": risk_left_today,
                     "pl_target": pl_target,
-                    # --- [MODIFIED] Added new keys to the payload ---
                     "todays_total_pl": todays_total_pl,
                     "todays_total_pl_percent": todays_total_pl_percent,
-                    # --- End of Modification ---
                     "open_positions": positions_df.to_dict('records'),
                     "pending_orders": pending_orders_df.to_dict('records'),
                     "trade_history": history_df.to_dict('records'),
                     "all_symbols": list(SESSION_STATE["symbol_properties"].keys()),
                     "portfolio_context": SESSION_STATE.get("portfolio_context"),
                     "mt5_account_id": SESSION_STATE.get("mt5_account_id"),
-                    "current_tick": mt5_handler.get_current_tick('XAUUSD') or {'bid': 0, 'ask': 0},
+                    "current_tick": mt5_handler.get_current_tick(SESSION_STATE.get('subscribed_symbol', 'XAUUSD')) or {'bid': 0, 'ask': 0},
                     "open_positions_total_profit": positions_df['Profit'].sum() if not positions_df.empty else 0.0,
                     "open_positions_total_risk": total_open_risk,
                     "history_total_profit": realized_pl_today
@@ -92,8 +94,18 @@ async def fetch_and_broadcast_data(mt5_handler: MT5Handler, supabase_handler: He
         except Exception as e:
             print(f"ERROR in broadcast loop: {e}")
             traceback.print_exc()
+            error_payload = {
+                "status": "ERROR_STATE",
+                "error": {
+                    "title": "Backend System Error",
+                    "message": f"A critical error occurred: {str(e)}. The system is attempting to recover."
+                }
+            }
+            if CONNECTED_CLIENTS:
+                await asyncio.gather(*(client.send(json.dumps(error_payload, default=json_converter)) for client in CONNECTED_CLIENTS))
             await asyncio.sleep(5)
 
+# --- The rest of the file (listen_to_client, main, etc.) remains unchanged ---
 async def listen_to_client(websocket, mt5_handler: MT5Handler, supabase_handler: HeadlessSupabaseHandler):
     async for message in websocket:
         try:
@@ -139,6 +151,9 @@ async def listen_to_client(websocket, mt5_handler: MT5Handler, supabase_handler:
                 if SESSION_STATE["status"] == "SESSION_ACTIVE":
                     ticket = payload.get("ticket")
                     if ticket: mt5_handler.close_position_by_ticket(ticket)
+            elif event == "SUBSCRIBE_TICK":
+                if payload.get("symbol"):
+                    SESSION_STATE['subscribed_symbol'] = payload.get("symbol")
         except Exception as e:
             print(f"Error processing client message: {e}"); traceback.print_exc()
 

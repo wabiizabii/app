@@ -133,6 +133,98 @@
         tfoot tr { background-color: rgba(13, 17, 23, 0.8); font-weight: 700; }
         .btn-close-pos { background-color: var(--color-danger); color: white; border: none; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; cursor: pointer; }
         /* --- [END] UI REFINEMENTS --- */
+        /* --- NOTIFICATION CENTER STYLES --- */
+        #notification-area {
+            position: relative;
+            margin-left: auto;
+            margin-right: 16px;
+            display: flex;
+            align-items: center;
+        }
+        #notification-bell {
+            cursor: pointer;
+            font-size: 1.2rem;
+            color: var(--color-text-secondary);
+            transition: color 0.2s ease;
+        }
+        #notification-bell:hover { color: var(--color-text-primary); }
+        #notification-badge {
+            position: absolute; top: -5px; right: -8px;
+            background-color: var(--color-danger); color: white;
+            border-radius: 50%; width: 18px; height: 18px;
+            font-size: 0.7rem; font-weight: 700;
+            display: flex; justify-content: center; align-items: center;
+            border: 2px solid var(--color-bg-primary);
+        }
+        #notification-panel {
+            position: absolute; top: 70px; left: 16px;
+            width: 400px; max-height: 40vh;
+            background-color: #161b22; border: 1px solid var(--color-border);
+            border-radius: 8px; z-index: 1000;
+            display: flex; flex-direction: column;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+        #notification-panel .panel-header {
+            padding: 12px 16px; font-weight: 700; text-transform: uppercase;
+            border-bottom: 1px solid var(--color-border); color: var(--color-text-secondary);
+        }
+        #notification-list { list-style: none; overflow-y: auto; padding: 8px; margin: 0; flex-grow: 1; }
+        .notification-item { padding: 12px; border-bottom: 1px solid var(--color-border); font-size: 0.85rem; }
+        .notification-item:last-child { border-bottom: none; }
+        .notification-item strong { display: block; margin-bottom: 4px; font-weight: 500; color: var(--color-text-primary); }
+        .notification-item.is-danger strong { color: var(--color-danger); }
+        .notification-item.is-warning strong { color: var(--color-warning); }
+        .notification-item.is-success strong { color: var(--color-success); }
+
+        .modal-backdrop {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            z-index: 2000;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background-color: #161b22; border: 1px solid var(--color-danger);
+            border-radius: 8px; padding: 24px 32px;
+            width: 90%; max-width: 450px; text-align: center;
+            box-shadow: 0 0 20px rgba(218, 51, 61, 0.3);
+        }
+        .modal-content h3 { color: var(--color-danger); margin-bottom: 16px; }
+        .modal-content p { margin-bottom: 24px; color: var(--color-text-secondary); line-height: 1.5; }
+        .modal-content button {
+            font-family: 'Roboto', sans-serif; font-weight: 700;
+            font-size: 0.9rem; color: #fff; background-color: var(--color-danger);
+            border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer;
+        }
+        /* --- [ADDED] Phase 1.2: Toast Notification Styles --- */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .toast {
+            width: 350px;
+            padding: 16px;
+            border-radius: 6px;
+            color: #fff;
+            background-color: #161b22;
+            border-left: 5px solid #555;
+            box-shadow: 0 3px Gist AI is good at writing code.10px rgba(0,0,0,0.1);
+            animation: toast-fade-in 0.5s ease;
+            font-size: 0.9rem;
+        }
+        .toast.is-success { background-color: #0e2415; border-left-color: var(--color-success); }
+        .toast.is-warning { background-color: #2e2409; border-left-color: var(--color-warning); color: #e2b313; }
+        .toast.is-danger { background-color: #290e11; border-left-color: var(--color-danger); }
+        .toast.is-info { background-color: #0c1d36; border-left-color: var(--color-accent-primary); }
+        .toast-title { font-weight: 700; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px; font-size: 0.8rem;}
+        @keyframes toast-fade-in { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes toast-fade-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(100%); } }
+
     </style>
 </head>
 <body>
@@ -159,6 +251,13 @@
         <div id="bp-flyout-tab" class="flyout-tab">Planner</div>
         <div id="an-flyout-tab" class="flyout-tab">Analysis</div>
     </div>
+    
+    <!-- --- [ADDED] Phase 1.2: Toast Notification UI Container --- -->
+    <div id="notification-panel" class="hidden">
+        <div class="panel-header">Notifications</div>
+        <ul id="notification-list"></ul>
+    </div>
+    
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
@@ -180,7 +279,11 @@
         let tradingViewWidget = null;
 
         function main() {
-            const selectors = { body: document.body, ignitionModule: document.getElementById('ignition-module'), cockpitContainer: document.getElementById('cockpit-container'), startTradingBtn: document.getElementById('startTradingBtn'), openingBalanceInput: document.getElementById('openingBalanceInput'), liveEquityValue: document.getElementById('live-equity-value'), unrealizedPlNumbers: document.getElementById('unrealized-pl-numbers'), riskLeftValue: document.getElementById('risk-left-value'), riskUsedDisplay: document.getElementById('risk-used-display'), riskAvailableText: document.getElementById('risk-available-text'), riskProgressBar: document.getElementById('risk-progress-bar'), sessionPlValue: document.getElementById('session-pl-value'), plTargetValue: document.getElementById('pl-target-value'), openingBalanceDisplay: document.getElementById('opening-balance-display'), sessionPlPercent: document.getElementById('session-pl-percent'), sessionPlProgressBar: document.getElementById('session-pl-progress-bar'), riskDial: document.getElementById('risk-dial'), openPositionsTableBody: document.getElementById('open-positions-tbody'), pendingOrdersTableBody: document.getElementById('pending-orders-tbody'), tradeHistoryTableBody: document.getElementById('trade-history-tbody'), symbolSelect: document.getElementById('symbol-select'), orderTypeSelect: document.getElementById('order-type-hidden'), entryPriceGroup: document.getElementById('entry-price-group'), entryPriceInput: document.getElementById('entry-price'), stopLossInput: document.getElementById('stop-loss'), takeProfitInput: document.getElementById('take-profit'), calculateBtn: document.getElementById('calculate-btn'), armBtn: document.getElementById('arm-btn'), executeBtn: document.getElementById('execute-btn'), potentialLossValue: document.getElementById('potential-loss-value'), potentialLossPercent: document.getElementById('potential-loss-percent'), potentialProfitValue: document.getElementById('potential-profit-value'), rrRatioValue: document.getElementById('rr-ratio-value'), lotSizeInput: document.getElementById('lot-size-input'), tpslCheckbox: document.getElementById('tpsl-checkbox'), hudStatusIndicator: document.getElementById('hud-status-indicator'), portfolioNameDisplay: document.getElementById('portfolio-name-display'), mt5AccountDisplay: document.getElementById('mt5-account-display'), totalOpenRisk: document.getElementById('total-open-risk'), totalOpenProfit: document.getElementById('total-open-profit'), totalHistoryProfit: document.getElementById('total-history-profit'), battlePlannerCard: document.getElementById('battle-planner-expander'), plToTargetBar: document.getElementById('pl-to-target-bar'), mainView: document.getElementById('main-view'), leftCol: document.getElementById('left-col'), battlePlannerCol: document.getElementById('battle-planner-col'), analysisCol: document.getElementById('analysis-col'), splitter1: document.getElementById('splitter1'), splitter2: document.getElementById('splitter2'), hSplitter: document.getElementById('h-splitter'), bottomBar: document.getElementById('bottom-bar'), analysisExpander: document.getElementById('analysis-expander'),
+
+            let unreadNotificationCount = 0;
+            let allNotifications = [];
+
+            const selectors = { body: document.body, ignitionModule: document.getElementById('ignition-module'), cockpitContainer: document.getElementById('cockpit-container'), startTradingBtn: document.getElementById('startTradingBtn'), openingBalanceInput: document.getElementById('openingBalanceInput'), liveEquityValue: document.getElementById('live-equity-value'), unrealizedPlNumbers: document.getElementById('unrealized-pl-numbers'), riskLeftValue: document.getElementById('risk-left-value'), riskUsedDisplay: document.getElementById('risk-used-display'), riskAvailableText: document.getElementById('risk-available-text'), riskProgressBar: document.getElementById('risk-progress-bar'), sessionPlValue: document.getElementById('session-pl-value'), plTargetValue: document.getElementById('pl-target-value'), openingBalanceDisplay: document.getElementById('opening-balance-display'), sessionPlPercent: document.getElementById('session-pl-percent'), sessionPlProgressBar: document.getElementById('session-pl-progress-bar'), riskDial: document.getElementById('risk-dial'), openPositionsTableBody: document.getElementById('open-positions-tbody'), pendingOrdersTableBody: document.getElementById('pending-orders-tbody'), tradeHistoryTableBody: document.getElementById('trade-history-tbody'), symbolSelect: document.getElementById('symbol-select'), orderTypeSelect: document.getElementById('order-type-hidden'), entryPriceGroup: document.getElementById('entry-price-group'), entryPriceInput: document.getElementById('entry-price'), stopLossInput: document.getElementById('stop-loss'), takeProfitInput: document.getElementById('take-profit'), calculateBtn: document.getElementById('calculate-btn'), armBtn: document.getElementById('arm-btn'), executeBtn: document.getElementById('execute-btn'), potentialLossValue: document.getElementById('potential-loss-value'), potentialLossPercent: document.getElementById('potential-loss-percent'), potentialProfitValue: document.getElementById('potential-profit-value'), rrRatioValue: document.getElementById('rr-ratio-value'), lotSizeInput: document.getElementById('lot-size-input'), tpslCheckbox: document.getElementById('tpsl-checkbox'), hudStatusIndicator: document.getElementById('hud-status-indicator'), portfolioNameDisplay: document.getElementById('portfolio-name-display'), mt5AccountDisplay: document.getElementById('mt5-account-display'), totalOpenRisk: document.getElementById('total-open-risk'), totalOpenProfit: document.getElementById('total-open-profit'), totalHistoryProfit: document.getElementById('total-history-profit'), dailyRiskCard: document.getElementById('daily-risk-card'), battlePlannerCard: document.getElementById('battle-planner-expander'), plToTargetBar: document.getElementById('pl-to-target-bar'), mainView: document.getElementById('main-view'), leftCol: document.getElementById('left-col'), battlePlannerCol: document.getElementById('battle-planner-col'), analysisCol: document.getElementById('analysis-col'), splitter1: document.getElementById('splitter1'), splitter2: document.getElementById('splitter2'), hSplitter: document.getElementById('h-splitter'), bottomBar: document.getElementById('bottom-bar'), analysisExpander: document.getElementById('analysis-expander'),
             bpFlyoutTab: document.getElementById('bp-flyout-tab'), anFlyoutTab: document.getElementById('an-flyout-tab'), situationalAwarenessCard: document.getElementById('situational-awareness-card')
             };
             
@@ -192,12 +295,14 @@
             socket.onerror = () => { selectors.hudStatusIndicator.textContent = '● Error'; selectors.hudStatusIndicator.style.color = 'var(--color-danger)'; };
             
             socket.onmessage = (event) => { 
-                const serverData = JSON.parse(event.data); 
-                if (serverData.status === "ERROR_STATE" && serverData.error) {
-                    alert(`[Backend Error] ${serverData.error.title}: ${serverData.error.message}`);
-                    selectors.hudStatusIndicator.textContent = '● SYSTEM ERROR';
-                    selectors.hudStatusIndicator.style.color = 'var(--color-danger)';
-                } else if (serverData.status === "READY_TO_START") { 
+                const serverData = JSON.parse(event.data);
+                
+                // Process notifications on every message that might contain them
+                if (serverData.events && serverData.events.length > 0) {
+                    processNotifications(serverData.events);
+                }
+                
+                if (serverData.status === "READY_TO_START") { 
                     selectors.openingBalanceInput.value = serverData.suggested_balance.toFixed(2); 
                     selectors.startTradingBtn.disabled = false; 
                     selectors.startTradingBtn.textContent = "START TRADING DAY"; 
@@ -206,8 +311,6 @@
                         selectors.ignitionModule.style.display = 'none'; 
                         selectors.cockpitContainer.classList.remove('hidden'); 
                     } 
-                    selectors.hudStatusIndicator.textContent = '● Connected';
-                    selectors.hudStatusIndicator.style.color = 'var(--color-success)';
                     
                     AppState = { ...AppState, ...serverData };
                     if (selectors.symbolSelect.options.length <= 1 && AppState.all_symbols && AppState.all_symbols.length > 0) { 
@@ -239,6 +342,56 @@
                     } 
                 } 
             };
+            
+           // --- NOTIFICATION CENTER FUNCTIONS ---
+            function processNotifications(events) {
+                events.forEach(event => {
+                    unreadNotificationCount++;
+                    allNotifications.unshift(event); // Add to the top of the list
+                    
+                    if (event.is_critical) {
+                        showCriticalAlert(event);
+                    }
+                });
+                updateNotificationUI();
+            }
+
+            function updateNotificationUI() {
+                const badge = document.getElementById('notification-badge');
+                const list = document.getElementById('notification-list');
+                
+                if (unreadNotificationCount > 0) {
+                    badge.textContent = unreadNotificationCount;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+
+                if (list) {
+                    list.innerHTML = '';
+                    allNotifications.slice(0, 20).forEach(n => {
+                        const item = document.createElement('li');
+                        item.innerHTML = `<strong>${n.title}</strong><span>${n.message}</span>`;
+                        item.className = `notification-item is-${n.level}`;
+                        list.appendChild(item);
+                    });
+                }
+            }
+
+            function showCriticalAlert(event) {
+                if (document.querySelector('.modal-backdrop')) return; // Prevent duplicates
+                const template = document.getElementById('critical-alert-template');
+                const modalFragment = template.content.cloneNode(true);
+                const backdrop = modalFragment.querySelector('.modal-backdrop');
+                
+                modalFragment.querySelector('#critical-alert-title').textContent = event.title;
+                modalFragment.querySelector('#critical-alert-message').textContent = event.message;
+                
+                modalFragment.querySelector('#critical-alert-close-btn').addEventListener('click', () => {
+                    backdrop.remove();
+                });
+                document.body.appendChild(modalFragment);
+            }
 
             function initSymbolSelect(symbols) {
                 const whitelist = ['USD', 'XAU', 'WTI', 'BRN', 'NG', 'DJI30', 'NQ100', 'SP500'];
@@ -263,231 +416,49 @@
                 }
             }
 
-            function updateHudElements(data) {
-                const profitColor = 'var(--color-success)', lossColor = 'var(--color-danger)'; 
-                selectors.portfolioNameDisplay.textContent = data.portfolio_context?.PortfolioName || 'N/A'; 
-                selectors.mt5AccountDisplay.textContent = data.mt5_account_id || 'N/A'; 
-                selectors.liveEquityValue.textContent = `$${(data.equity || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`; 
-                selectors.liveEquityValue.style.color = data.todays_total_pl > 0 ? profitColor : data.todays_total_pl < 0 ? lossColor : 'inherit'; 
-                selectors.unrealizedPlNumbers.textContent = `$${(data.todays_total_pl || 0).toFixed(2)} (${(data.todays_total_pl_percent || 0).toFixed(2)}%)`; 
-                selectors.unrealizedPlNumbers.style.color = data.todays_total_pl > 0 ? profitColor : data.todays_total_pl < 0 ? lossColor : 'inherit'; 
-                const plToTargetPercent = data.pl_target > 0 ? ((data.unrealized_pl + data.realized_pl) / data.pl_target) * 100 : 0; 
-                selectors.plToTargetBar.style.width = `${Math.min(Math.max(plToTargetPercent, 0), 100)}%`;
-                selectors.openingBalanceDisplay.textContent = `Balance: $${(data.opening_balance || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`; 
-                selectors.sessionPlValue.textContent = `$${(data.realized_pl || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`; 
-                selectors.sessionPlValue.style.color = data.realized_pl > 0 ? profitColor : data.realized_pl < 0 ? lossColor : 'inherit'; 
-                selectors.plTargetValue.textContent = `$${(data.pl_target || 0).toFixed(2)}`; 
-                const plPercentOfTarget = data.pl_target > 0 ? (data.realized_pl / data.pl_target) * 100 : 0; 
-                selectors.sessionPlProgressBar.style.width = `${Math.min(Math.max(plPercentOfTarget, 0), 100)}%`; 
-                selectors.sessionPlPercent.textContent = `${plPercentOfTarget.toFixed(2)}%`;
-            }
-
-            function updateRiskMetrics(data) {
-                const lossColor = 'var(--color-danger)';
-                selectors.riskAvailableText.textContent = `Available: $${(data.available_risk || 0).toFixed(2)}`; 
-                const riskUsedPercent = data.available_risk > 0 ? (data.risk_used / data.available_risk) * 100 : 0; 
-                selectors.riskUsedDisplay.textContent = `Used: $${(data.risk_used || 0).toFixed(2)} (${riskUsedPercent.toFixed(2)}%)`; 
-                selectors.riskProgressBar.style.width = `${Math.min(riskUsedPercent, 100)}%`; 
-                if (data.risk_left <= 0) { 
-                    selectors.riskLeftValue.textContent = "RISK LIMIT REACHED"; 
-                    selectors.riskLeftValue.style.color = lossColor; 
-                    selectors.calculateBtn.disabled = true; 
-                    selectors.armBtn.disabled = true; 
-                    selectors.executeBtn.disabled = true; 
-                } else { 
-                    selectors.riskLeftValue.textContent = `$${(data.risk_left || 0).toFixed(2)}`; 
-                    const riskLeftPercent = (data.risk_left / data.available_risk); 
-                    selectors.riskLeftValue.style.color = `rgb(${Math.round(218+(35-218)*(1-riskLeftPercent))}, ${Math.round(54+(134-54)*riskLeftPercent)}, 51)`; 
-                    selectors.calculateBtn.disabled = false; 
-                }
-            }
-
-            function renderAllTables(data) {
-                const profitColor = 'var(--color-success)', lossColor = 'var(--color-danger)'; 
-                renderTable(selectors.openPositionsTableBody, data.open_positions || [], createOpenPositionRow, 10, "No open positions"); 
-                renderTable(selectors.pendingOrdersTableBody, data.pending_orders || [], createPendingOrderRow, 8, "No pending orders"); 
-                renderTable(selectors.tradeHistoryTableBody, data.trade_history || [], createTradeHistoryRow, 5, "No trade history for today"); 
-                const totalOpenRisk = data.open_positions_total_risk || 0; 
-                selectors.totalOpenRisk.textContent = `$${totalOpenRisk.toFixed(2)}`; 
-                const totalOpenProfit = data.open_positions_total_profit || 0; 
-                selectors.totalOpenProfit.textContent = `$${totalOpenProfit.toFixed(2)}`; 
-                selectors.totalOpenProfit.style.color = totalOpenProfit >= 0 ? profitColor : lossColor; 
-                const totalHistoryProfit = data.history_total_profit || 0; 
-                selectors.totalHistoryProfit.textContent = `$${totalHistoryProfit.toFixed(2)}`; 
-                selectors.totalHistoryProfit.style.color = totalHistoryProfit >= 0 ? profitColor : lossColor;
-            }
-
-            function renderTable(tbody, data, rowCreator, colspan, emptyMessage) { 
-                tbody.innerHTML = ''; 
-                if (data.length === 0) { 
-                    tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center; color: var(--color-text-secondary);">${emptyMessage}</td></tr>`; return; 
-                } 
-                data.forEach(item => tbody.insertAdjacentHTML('beforeend', rowCreator(item))); 
-            }
+            function updateHudElements(data) { const profitColor = 'var(--color-success)', lossColor = 'var(--color-danger)'; selectors.portfolioNameDisplay.textContent = data.portfolio_context?.PortfolioName || 'N/A'; selectors.mt5AccountDisplay.textContent = data.mt5_account_id || 'N/A'; selectors.liveEquityValue.textContent = `$${(data.equity || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`; selectors.liveEquityValue.style.color = data.todays_total_pl > 0 ? profitColor : data.todays_total_pl < 0 ? lossColor : 'inherit'; selectors.unrealizedPlNumbers.textContent = `$${(data.todays_total_pl || 0).toFixed(2)} (${(data.todays_total_pl_percent || 0).toFixed(2)}%)`; selectors.unrealizedPlNumbers.style.color = data.todays_total_pl > 0 ? profitColor : data.todays_total_pl < 0 ? lossColor : 'inherit'; const plToTargetPercent = data.pl_target > 0 ? ((data.unrealized_pl + data.realized_pl) / data.pl_target) * 100 : 0; selectors.plToTargetBar.style.width = `${Math.min(Math.max(plToTargetPercent, 0), 100)}%`; selectors.openingBalanceDisplay.textContent = `Balance: $${(data.opening_balance || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`; selectors.sessionPlValue.textContent = `$${(data.realized_pl || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`; selectors.sessionPlValue.style.color = data.realized_pl > 0 ? profitColor : data.realized_pl < 0 ? lossColor : 'inherit'; selectors.plTargetValue.textContent = `$${(data.pl_target || 0).toFixed(2)}`; const plPercentOfTarget = data.pl_target > 0 ? (data.realized_pl / data.pl_target) * 100 : 0; selectors.sessionPlProgressBar.style.width = `${Math.min(Math.max(plPercentOfTarget, 0), 100)}%`; selectors.sessionPlPercent.textContent = `${plPercentOfTarget.toFixed(2)}%`; }
+            function updateRiskMetrics(data) { const lossColor = 'var(--color-danger)'; selectors.riskAvailableText.textContent = `Available: $${(data.available_risk || 0).toFixed(2)}`; const riskUsedPercent = data.available_risk > 0 ? (data.risk_used / data.available_risk) * 100 : 0; selectors.riskUsedDisplay.textContent = `Used: $${(data.risk_used || 0).toFixed(2)} (${riskUsedPercent.toFixed(2)}%)`; selectors.riskProgressBar.style.width = `${Math.min(riskUsedPercent, 100)}%`; if (data.risk_left <= 0) { selectors.riskLeftValue.textContent = "RISK LIMIT REACHED"; selectors.riskLeftValue.style.color = lossColor; selectors.calculateBtn.disabled = true; selectors.armBtn.disabled = true; selectors.executeBtn.disabled = true; } else { selectors.riskLeftValue.textContent = `$${(data.risk_left || 0).toFixed(2)}`; const riskLeftPercent = (data.risk_left / data.available_risk); selectors.riskLeftValue.style.color = `rgb(${Math.round(218+(35-218)*(1-riskLeftPercent))}, ${Math.round(54+(134-54)*riskLeftPercent)}, 51)`; selectors.calculateBtn.disabled = false; } }
+            function renderAllTables(data) { const profitColor = 'var(--color-success)', lossColor = 'var(--color-danger)'; renderTable(selectors.openPositionsTableBody, data.open_positions || [], createOpenPositionRow, 10, "No open positions"); renderTable(selectors.pendingOrdersTableBody, data.pending_orders || [], createPendingOrderRow, 8, "No pending orders"); renderTable(selectors.tradeHistoryTableBody, data.trade_history || [], createTradeHistoryRow, 5, "No trade history for today"); const totalOpenRisk = data.open_positions_total_risk || 0; selectors.totalOpenRisk.textContent = `$${totalOpenRisk.toFixed(2)}`; const totalOpenProfit = data.open_positions_total_profit || 0; selectors.totalOpenProfit.textContent = `$${totalOpenProfit.toFixed(2)}`; selectors.totalOpenProfit.style.color = totalOpenProfit >= 0 ? profitColor : lossColor; const totalHistoryProfit = data.history_total_profit || 0; selectors.totalHistoryProfit.textContent = `$${totalHistoryProfit.toFixed(2)}`; selectors.totalHistoryProfit.style.color = totalHistoryProfit >= 0 ? profitColor : lossColor; }
+            function renderTable(tbody, data, rowCreator, colspan, emptyMessage) { tbody.innerHTML = ''; if (data.length === 0) { tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center; color: var(--color-text-secondary);">${emptyMessage}</td></tr>`; return; } data.forEach(item => tbody.insertAdjacentHTML('beforeend', rowCreator(item))); }
             function createOpenPositionRow(pos) { const profitColor = pos.Profit >= 0 ? 'text-profit' : 'text-loss'; return `<tr><td>${pos.Time || ''}</td><td>${pos.Symbol}</td><td>${pos.Type}</td><td>${pos.Volume}</td><td>${pos.Price}</td><td>${pos.SL || ''}</td><td>${pos.TP || ''}</td><td class="text-loss">$${(pos.position_risk || 0).toFixed(2)}</td><td class="${profitColor}">$${(pos.Profit || 0).toFixed(2)}</td><td><button class="btn-close-pos" data-ticket="${pos.Ticket}">Close</button></td></tr>`; }
             function createPendingOrderRow(ord) { return `<tr><td>${ord.Ticket}</td><td>${ord.Time || ''}</td><td>${ord.Symbol}</td><td>${ord.Type}</td><td>${ord.Lots}</td><td>${ord['Entry Price']}</td><td>${ord.SL}</td><td>${ord.TP}</td></tr>`; }
             function createTradeHistoryRow(trade) { const profitColor = trade.Profit >= 0 ? 'text-profit' : 'text-loss'; return `<tr><td>${trade['Close Time'] || ''}</td><td>${trade.Symbol || ''}</td><td>${trade.Type || ''}</td><td>${trade.Volume || 0}</td><td class="${profitColor}">$${(trade.Profit || 0).toFixed(2)}</td></tr>`; }
-            
-            function resetCalculator(fullReset = true) { 
-                if (!selectors.dailyRiskCard) return; 
-                if (fullReset) { selectors.lotSizeInput.value = '0.00'; if (selectors.tpslCheckbox.checked) { selectors.stopLossInput.value = ''; selectors.takeProfitInput.value = ''; } } selectors.potentialLossValue.textContent = '-$0.00'; selectors.potentialLossPercent.textContent = ''; selectors.potentialProfitValue.textContent = '+$0.00'; selectors.rrRatioValue.textContent = '-'; selectors.armBtn.disabled = true; selectors.executeBtn.disabled = true; selectors.armBtn.classList.remove('standby-pulse'); selectors.executeBtn.classList.remove('urgent-pulse'); selectors.dailyRiskCard.classList.remove('flash-warning'); selectors.situationalAwarenessCard.classList.remove('order-sent-flash'); clearTimeout(animationTimeout); lastCalculation = {}; 
-            }
-            function renderTradingViewWidget(symbol) { 
-                if (!symbol) return;
-                const symbolMap = { 'WTI_': 'TVC:USOIL', 'BRN_': 'TVC:UKOIL', 'NG_':  'TVC:NATGAS', 'DJI30_': 'TVC:DJI', 'NQ100_': 'TVC:NDX', 'SP500_': 'TVC:SPX', 'DAX40_': 'TVC:DAX' };
-                let tvSymbol;
-                if (symbolMap[symbol]) {
-                    tvSymbol = symbolMap[symbol];
-                } else {
-                    const cleanSymbol = symbol.replace(/_$/, '');
-                    tvSymbol = `OANDA:${cleanSymbol}`;
-                }
-                if (tradingViewWidget && typeof tradingViewWidget.setSymbol === 'function') { 
-                    tradingViewWidget.setSymbol(tvSymbol, "15", () => {}); 
-                } else { 
-                    tradingViewWidget = new TradingView.widget({ "container_id": "tradingview-widget-container", "autosize": true, "symbol": tvSymbol, "interval": "15", "timezone": "Etc/UTC", "theme": "dark", "style": "1", "locale": "en", "enable_publishing": false, "hide_side_toolbar": false, "details": true, "studies": ["MASimple@tv-basicstudies"] }); 
-                } 
-            }
+            function resetCalculator(fullReset = true) { if (!selectors.dailyRiskCard) return; if (fullReset) { selectors.lotSizeInput.value = '0.00'; if (selectors.tpslCheckbox.checked) { selectors.stopLossInput.value = ''; selectors.takeProfitInput.value = ''; } } selectors.potentialLossValue.textContent = '-$0.00'; selectors.potentialLossPercent.textContent = ''; selectors.potentialProfitValue.textContent = '+$0.00'; selectors.rrRatioValue.textContent = '-'; selectors.armBtn.disabled = true; selectors.executeBtn.disabled = true; selectors.armBtn.classList.remove('standby-pulse'); selectors.executeBtn.classList.remove('urgent-pulse'); selectors.dailyRiskCard.classList.remove('flash-warning'); selectors.situationalAwarenessCard.classList.remove('order-sent-flash'); clearTimeout(animationTimeout); lastCalculation = {}; }
+            function renderTradingViewWidget(symbol) { if (!symbol) return; const symbolMap = { 'WTI_': 'TVC:USOIL', 'BRN_': 'TVC:UKOIL', 'NG_': 'TVC:NATGAS', 'DJI30_': 'TVC:DJI', 'NQ100_': 'TVC:NDX', 'SP500_': 'TVC:SPX', 'DAX40_': 'TVC:DAX' }; let tvSymbol; if (symbolMap[symbol]) { tvSymbol = symbolMap[symbol]; } else { const cleanSymbol = symbol.replace(/_$/, ''); tvSymbol = `OANDA:${cleanSymbol}`; } if (tradingViewWidget && typeof tradingViewWidget.setSymbol === 'function') { tradingViewWidget.setSymbol(tvSymbol, "15", () => {}); } else { tradingViewWidget = new TradingView.widget({ "container_id": "tradingview-widget-container", "autosize": true, "symbol": tvSymbol, "interval": "15", "timezone": "Etc/UTC", "theme": "dark", "style": "1", "locale": "en", "enable_publishing": false, "hide_side_toolbar": false, "details": true, "studies": ["MASimple@tv-basicstudies"] }); } }
             function updatePlannerReadouts(currentLot) { currentLot = parseFloat(currentLot) || 0; if (!lastCalculation.lot_size || lastCalculation.lot_size === 0 || currentLot <= 0) { selectors.lotSizeInput.value = currentLot > 0 ? currentLot.toFixed(2) : '0.00'; resetCalculator(false); selectors.potentialLossValue.classList.remove('text-profit', 'text-warning', 'text-loss'); selectors.potentialLossPercent.classList.remove('text-profit', 'text-warning', 'text-loss'); return; } const lotRatio = currentLot / lastCalculation.lot_size; let potentialLoss = (lastCalculation.potential_loss_usd || 0) * lotRatio; if (AppState.risk_left > 0 && potentialLoss > AppState.risk_left) { const maxLotRatio = AppState.risk_left / (lastCalculation.potential_loss_usd || 1); currentLot = lastCalculation.lot_size * maxLotRatio; potentialLoss = AppState.risk_left; } selectors.lotSizeInput.value = currentLot.toFixed(2); const potentialProfit = (lastCalculation.potential_profit_usd || 0) * (currentLot / lastCalculation.lot_size); selectors.potentialLossValue.textContent = `-$${potentialLoss.toFixed(2)}`; selectors.potentialProfitValue.textContent = `+$${potentialProfit.toFixed(2)}`; selectors.rrRatioValue.textContent = (potentialLoss > 0) ? (potentialProfit / potentialLoss).toFixed(2) : '-'; const lossPercentOfRiskLeft = (AppState.risk_left > 0 && potentialLoss > 0) ? (potentialLoss / AppState.risk_left) * 100 : 0; selectors.potentialLossPercent.textContent = `(${(lossPercentOfRiskLeft).toFixed(2)}% of Risk Left)`; selectors.potentialLossValue.classList.remove('text-profit', 'text-warning', 'text-loss'); selectors.potentialLossPercent.classList.remove('text-profit', 'text-warning', 'text-loss'); if (lossPercentOfRiskLeft > 50) { selectors.potentialLossValue.classList.add('text-loss'); selectors.potentialLossPercent.classList.add('text-loss'); } else if (lossPercentOfRiskLeft > 25) { selectors.potentialLossValue.classList.add('text-warning'); selectors.potentialLossPercent.classList.add('text-warning'); } else if (lossPercentOfRiskLeft > 0) { selectors.potentialLossValue.classList.add('text-profit'); selectors.potentialLossPercent.classList.add('text-profit'); } }
             
-            const layoutManager = {
-                init() {
-                    selectors.battlePlannerCol.classList.add('panel-column');
-                    selectors.analysisCol.classList.add('panel-column');
-                    this.initSplitter(selectors.splitter1, selectors.leftCol, selectors.battlePlannerCol);
-                    this.initSplitter(selectors.splitter2, selectors.battlePlannerCol, selectors.analysisCol);
-                    this.initSplitter(selectors.hSplitter, selectors.mainView, selectors.bottomBar);
-                    selectors.battlePlannerCard.querySelector('.card-header').addEventListener('click', () => this.togglePanel(selectors.battlePlannerCol, 'bp-collapsed'));
-                    selectors.analysisExpander.querySelector('.card-header').addEventListener('click', () => this.togglePanel(selectors.analysisCol, 'an-collapsed'));
-                    selectors.bpFlyoutTab.addEventListener('click', () => this.togglePanel(selectors.battlePlannerCol, 'bp-collapsed'));
-                    selectors.anFlyoutTab.addEventListener('click', () => this.togglePanel(selectors.analysisCol, 'an-collapsed'));
-                },
-                togglePanel(panelElement, bodyClass) {
-                    panelElement.classList.toggle('collapsed');
-                    selectors.body.classList.toggle(bodyClass);
-                },
-                initSplitter(splitterEl, elA, elB) { 
-                    const handleMouseMove = (e) => { 
-                        const isVertical = splitterEl.classList.contains('v-splitter');
-                        const rectA = elA.getBoundingClientRect();
-                        if (isVertical) {
-                            const totalFlexWidth = elA.offsetWidth + elB.offsetWidth;
-                            const newBasisA = e.clientX - rectA.left;
-                            if (newBasisA > 50 && (totalFlexWidth - newBasisA) > 50) {
-                            elA.style.flexBasis = `${newBasisA}px`;
-                            elB.style.flexBasis = `${totalFlexWidth - newBasisA}px`;
-                            }
-                        } else {
-                            const totalFlexHeight = elA.offsetHeight + elB.offsetHeight;
-                            const newBasisA = e.clientY - rectA.top;
-                            if (newBasisA > 100 && (totalFlexHeight - newBasisA) > 100) {
-                                elA.style.flexBasis = `${newBasisA}px`;
-                                elB.style.flexBasis = `${totalFlexHeight - newBasisA}px`;
-                            }
-                        } 
-                    }; 
-                    const handleMouseUp = () => { document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', handleMouseUp); }; 
-                    splitterEl.addEventListener('mousedown', (e) => { e.preventDefault(); document.addEventListener('mousemove', handleMouseMove); document.addEventListener('mouseup', handleMouseUp); }); 
-                },
-            };
+            const layoutManager = { init() { selectors.battlePlannerCol.classList.add('panel-column'); selectors.analysisCol.classList.add('panel-column'); this.initSplitter(selectors.splitter1, selectors.leftCol, selectors.battlePlannerCol); this.initSplitter(selectors.splitter2, selectors.battlePlannerCol, selectors.analysisCol); this.initSplitter(selectors.hSplitter, selectors.mainView, selectors.bottomBar); selectors.battlePlannerCard.querySelector('.card-header').addEventListener('click', () => this.togglePanel(selectors.battlePlannerCol, 'bp-collapsed')); selectors.analysisExpander.querySelector('.card-header').addEventListener('click', () => this.togglePanel(selectors.analysisCol, 'an-collapsed')); selectors.bpFlyoutTab.addEventListener('click', () => this.togglePanel(selectors.battlePlannerCol, 'bp-collapsed')); selectors.anFlyoutTab.addEventListener('click', () => this.togglePanel(selectors.analysisCol, 'an-collapsed')); }, togglePanel(panelElement, bodyClass) { panelElement.classList.toggle('collapsed'); selectors.body.classList.toggle(bodyClass); }, initSplitter(splitterEl, elA, elB) { const handleMouseMove = (e) => { const isVertical = splitterEl.classList.contains('v-splitter'); const rectA = elA.getBoundingClientRect(); if (isVertical) { const totalFlexWidth = elA.offsetWidth + elB.offsetWidth; const newBasisA = e.clientX - rectA.left; if (newBasisA > 50 && (totalFlexWidth - newBasisA) > 50) { elA.style.flexBasis = `${newBasisA}px`; elB.style.flexBasis = `${totalFlexWidth - newBasisA}px`; } } else { const totalFlexHeight = elA.offsetHeight + elB.offsetHeight; const newBasisA = e.clientY - rectA.top; if (newBasisA > 100 && (totalFlexHeight - newBasisA) > 100) { elA.style.flexBasis = `${newBasisA}px`; elB.style.flexBasis = `${totalFlexHeight - newBasisA}px`; } } }; const handleMouseUp = () => { document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', handleMouseUp); }; splitterEl.addEventListener('mousedown', (e) => { e.preventDefault(); document.addEventListener('mousemove', handleMouseMove); document.addEventListener('mouseup', handleMouseUp); }); }, };
 
             // Event Listeners
             selectors.startTradingBtn.addEventListener('click', () => { const balanceValue = selectors.openingBalanceInput.value; if (balanceValue && !isNaN(parseFloat(balanceValue)) && parseFloat(balanceValue) > 0) { socket.send(JSON.stringify({ event: "START_SESSION", payload: { openingBalance: parseFloat(balanceValue) } })); } else { alert("Please enter a valid opening balance."); } });
-            selectors.bottomBar.addEventListener('click', (event) => { 
-                if (event.target.classList.contains('btn-close-pos')) { 
-                    const ticket = event.target.dataset.ticket; 
-                    if (ticket && confirm(`Are you sure you want to close position with ticket #${ticket}?`)) { 
-                        socket.send(JSON.stringify({ event: "CLOSE_POSITION", payload: { ticket: parseInt(ticket) } })); 
-                    } 
-                }
-            });
-            selectors.calculateBtn.addEventListener('click', () => { 
-                resetCalculator(false); 
-                if (!selectors.tpslCheckbox.checked || !parseFloat(selectors.stopLossInput.value)) { 
-                    alert("Please check the TP/SL box and enter a valid Stop Loss price to calculate."); 
-                    return; 
-                } 
-                const command = { 
-                    event: "CALCULATE_LOT_REQUEST", 
-                    payload: { 
-                        symbol: selectors.symbolSelect.value, 
-                        sl_price: parseFloat(selectors.stopLossInput.value) || 0, 
-                        tp_price: parseFloat(selectors.takeProfitInput.value) || 0, 
-                        risk_percent: parseFloat(selectors.riskDial.value), 
-                        order_type_str: selectors.orderTypeSelect.value, 
-                        entry_price: parseFloat(selectors.entryPriceInput.value) || 0 
-                    } 
-                }; 
-                if(!command.payload.symbol) { 
-                    alert("Please select a Symbol."); 
-                    return; 
-                } 
-                socket.send(JSON.stringify(command)); 
-            });
-            selectors.armBtn.addEventListener('click', () => { 
-                selectors.armBtn.classList.remove('standby-pulse'); 
-                selectors.armBtn.disabled = true; 
-                selectors.executeBtn.disabled = false; 
-                selectors.executeBtn.classList.add('urgent-pulse'); 
-            });
-            selectors.executeBtn.addEventListener('click', () => { 
-                const orderDetails = { 
-                    type: selectors.orderTypeSelect.value, 
-                    lot_size: parseFloat(selectors.lotSizeInput.value), 
-                    symbol: selectors.symbolSelect.value, 
-                    sl: parseFloat(selectors.stopLossInput.value) || 0, 
-                    tp: parseFloat(selectors.takeProfitInput.value) || 0, 
-                    entry_price: parseFloat(selectors.entryPriceInput.value) || 0 
-                }; 
-                if (orderDetails.lot_size <= 0) { 
-                    alert("Invalid Lot Size."); 
-                    return; 
-                } 
-                socket.send(JSON.stringify({ event: "EXECUTE_TRADE", payload: orderDetails })); 
-                selectors.executeBtn.classList.remove('urgent-pulse'); 
-                selectors.situationalAwarenessCard.classList.add('order-sent-flash'); 
-                setTimeout(() => { selectors.situationalAwarenessCard.classList.remove('order-sent-flash'); }, 1500); 
-                resetCalculator(); 
-            });
-            const tabButtons = document.querySelectorAll('.tab-btn'); 
-            tabButtons.forEach(button => { 
-                button.addEventListener('click', () => { 
-                    tabButtons.forEach(btn => btn.classList.remove('active')); 
-                    button.classList.add('active'); 
-                    const category = button.dataset.value; 
-                    const isMarket = category === 'MARKET'; 
-                    selectors.entryPriceGroup.classList.toggle('hidden', isMarket); 
-                    selectors.orderTypeSelect.value = isMarket ? 'MARKET_BUY' : (category === 'LIMIT' ? 'BUY_LIMIT' : 'BUY_STOP'); 
-                    selectors.orderTypeSelect.dispatchEvent(new Event('change')); 
-                }); 
-            });
+            selectors.bottomBar.addEventListener('click', (event) => { if (event.target.classList.contains('btn-close-pos')) { const ticket = event.target.dataset.ticket; if (ticket && confirm(`Are you sure you want to close position with ticket #${ticket}?`)) { socket.send(JSON.stringify({ event: "CLOSE_POSITION", payload: { ticket: parseInt(ticket) } })); } } });
+            selectors.calculateBtn.addEventListener('click', () => { resetCalculator(false); if (!selectors.tpslCheckbox.checked || !parseFloat(selectors.stopLossInput.value)) { alert("Please check the TP/SL box and enter a valid Stop Loss price to calculate."); return; } const command = { event: "CALCULATE_LOT_REQUEST", payload: { symbol: selectors.symbolSelect.value, sl_price: parseFloat(selectors.stopLossInput.value) || 0, tp_price: parseFloat(selectors.takeProfitInput.value) || 0, risk_percent: parseFloat(selectors.riskDial.value), order_type_str: selectors.orderTypeSelect.value, entry_price: parseFloat(selectors.entryPriceInput.value) || 0 } }; if(!command.payload.symbol) { alert("Please select a Symbol."); return; } socket.send(JSON.stringify(command)); });
+            selectors.armBtn.addEventListener('click', () => { selectors.armBtn.classList.remove('standby-pulse'); selectors.armBtn.disabled = true; selectors.executeBtn.disabled = false; selectors.executeBtn.classList.add('urgent-pulse'); });
+            selectors.executeBtn.addEventListener('click', () => { const orderDetails = { type: selectors.orderTypeSelect.value, lot_size: parseFloat(selectors.lotSizeInput.value), symbol: selectors.symbolSelect.value, sl: parseFloat(selectors.stopLossInput.value) || 0, tp: parseFloat(selectors.takeProfitInput.value) || 0, entry_price: parseFloat(selectors.entryPriceInput.value) || 0 }; if (orderDetails.lot_size <= 0) { alert("Invalid Lot Size."); return; } socket.send(JSON.stringify({ event: "EXECUTE_TRADE", payload: orderDetails })); selectors.executeBtn.classList.remove('urgent-pulse'); selectors.situationalAwarenessCard.classList.add('order-sent-flash'); setTimeout(() => { selectors.situationalAwarenessCard.classList.remove('order-sent-flash'); }, 1500); resetCalculator(); });
+            const tabButtons = document.querySelectorAll('.tab-btn'); tabButtons.forEach(button => { button.addEventListener('click', () => { tabButtons.forEach(btn => btn.classList.remove('active')); button.classList.add('active'); const category = button.dataset.value; const isMarket = category === 'MARKET'; selectors.entryPriceGroup.classList.toggle('hidden', isMarket); selectors.orderTypeSelect.value = isMarket ? 'MARKET_BUY' : (category === 'LIMIT' ? 'BUY_LIMIT' : 'BUY_STOP'); selectors.orderTypeSelect.dispatchEvent(new Event('change')); }); });
             selectors.orderTypeSelect.addEventListener('change', () => { resetCalculator(); });
-            const tpslGroups = document.querySelectorAll('.tpsl-group'); 
-            selectors.tpslCheckbox.addEventListener('change', () => { 
-                tpslGroups.forEach(g => g.style.display = selectors.tpslCheckbox.checked ? 'flex' : 'none'); 
-                resetCalculator(); 
-            });
+            const tpslGroups = document.querySelectorAll('.tpsl-group'); selectors.tpslCheckbox.addEventListener('change', () => { tpslGroups.forEach(g => g.style.display = selectors.tpslCheckbox.checked ? 'flex' : 'none'); resetCalculator(); });
             selectors.lotSizeInput.addEventListener('input', (e) => updatePlannerReadouts(e.target.value));
-            
-            document.querySelectorAll('.bottom-header-btn').forEach(tab => {
-                tab.addEventListener('click', () => {
-                    const section = document.getElementById(tab.dataset.target);
-                    const content = section.querySelector('.expander-content');
-                    tab.classList.toggle('active');
-                    section.classList.toggle('active');
-                    if (content.style.maxHeight) {
-                        content.style.maxHeight = null;
-                    } else {
-                        content.style.maxHeight = content.scrollHeight + "px";
-                    }
-                });
-            });
+            document.querySelectorAll('.bottom-header-btn').forEach(tab => { tab.addEventListener('click', () => { const section = document.getElementById(tab.dataset.target); const content = section.querySelector('.expander-content'); tab.classList.toggle('active'); section.classList.toggle('active'); if (content.style.maxHeight) { content.style.maxHeight = null; } else { content.style.maxHeight = content.scrollHeight + "px"; } }); });
 
             // Initial state setup
             layoutManager.init();
             document.querySelector('.tab-btn.active').click();
             document.querySelector('.bottom-header-btn[data-target="open-positions-section"]').click(); 
             selectors.tpslCheckbox.dispatchEvent(new Event('change'));
+        // --- NOTIFICATION EVENT LISTENERS ---
+            const bell = document.getElementById('notification-bell');
+            const panel = document.getElementById('notification-panel');
+
+            if (bell && panel) {
+                bell.addEventListener('click', () => {
+                    panel.classList.toggle('hidden');
+                    if (!panel.classList.contains('hidden')) { // Panel is now open
+                        unreadNotificationCount = 0;
+                        updateNotificationUI();
+                    }
+                });
+            }
         }
 
         main();
@@ -504,6 +475,12 @@
             </div>
             <div class="portfolio-info-bar">
                 <span><strong id="portfolio-name-display">N/A</strong> (<strong id="mt5-account-display">N/A</strong>)</span>
+                
+                <div id="notification-area">
+                    <div id="notification-bell">🔔</div>
+                    <span id="notification-badge" class="hidden">0</span>
+                </div>
+                
                 <div id="hud-status-indicator" class="status-indicator-hud">● Connecting...</div>
             </div>
         </div>
@@ -662,6 +639,15 @@
                         </table>
                     </div>
                 </div>
+            </div>
+        </div>
+    </template>
+    <template id="critical-alert-template">
+        <div class="modal-backdrop">
+            <div class="modal-content">
+                <h3 id="critical-alert-title">CRITICAL ALERT</h3>
+                <p id="critical-alert-message">This is a critical message.</p>
+                <button id="critical-alert-close-btn">Acknowledge</button>
             </div>
         </div>
     </template>

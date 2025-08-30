@@ -12,7 +12,25 @@ from core.mt5_handler import MT5Handler
 from config import settings
 
 WEBSOCKET_HOST, WEBSOCKET_PORT, CONNECTED_CLIENTS = "localhost", 5555, set()
-SESSION_STATE = { "status": "INITIALIZING", "mt5_account_id": None, "portfolio_id": None, "portfolio_context": None, "opening_balance": 0.0, "session_start_time_utc": None, "suggested_balance": 0.0, "is_resuming_session": False, "symbol_properties": {}, "risk_percent": 0.01, "subscribed_symbol": "XAUUSD" }
+SESSION_STATE = { 
+    "status": "INITIALIZING", 
+    "mt5_account_id": None, 
+    "portfolio_id": None, 
+    "portfolio_context": None, 
+    "opening_balance": 0.0, 
+    "session_start_time_utc": None, 
+    "suggested_balance": 0.0, 
+    "is_resuming_session": False, 
+    "symbol_properties": {}, 
+    "risk_percent": 0.01,
+    # --- [ADDED] Phase 1.1: State Flags for Event Debouncing ---
+    "session_flags": {
+        "risk_warned_80": False,
+        "risk_reached_100": False
+    }
+}
+# --- [ADDED] Phase 1.1: Global state for history comparison ---
+previous_history_df = pd.DataFrame()
 
 def json_converter(o):
     if isinstance(o, (datetime, pd.Timestamp)): return o.isoformat()
@@ -21,18 +39,16 @@ def json_converter(o):
     return str(o)
 
 async def fetch_and_broadcast_data(mt5_handler: MT5Handler, supabase_handler: HeadlessSupabaseHandler):
+    global previous_history_df
     while True:
         try:
             if SESSION_STATE["status"] == "SESSION_ACTIVE":
-                
-                # --- [FIXED] v0.1.1 Added explicit connection check ---
                 if not mt5.terminal_info():
                     raise ConnectionError("Connection to MetaTrader 5 terminal has been lost.")
-                # --- End of Fix ---
 
                 account_info = mt5_handler.get_account_info()
                 if not account_info:
-                    await asyncio.sleep(1) # Sleep briefly and retry
+                    await asyncio.sleep(1)
                     continue
                 
                 equity = account_info.get('equity', 0.0)
@@ -55,8 +71,7 @@ async def fetch_and_broadcast_data(mt5_handler: MT5Handler, supabase_handler: He
                 
                 total_open_risk = positions_df['position_risk'].sum() if not positions_df.empty else 0.0
                 risk_used_today = realized_loss_today + total_open_risk
-                risk_left_today = available_risk - risk_used_today
-
+                
                 todays_total_pl = equity - opening_balance
                 todays_total_pl_percent = (todays_total_pl / opening_balance * 100) if opening_balance > 0 else 0.0
 
@@ -69,7 +84,7 @@ async def fetch_and_broadcast_data(mt5_handler: MT5Handler, supabase_handler: He
                     "opening_balance": opening_balance,
                     "available_risk": available_risk,
                     "risk_used": risk_used_today,
-                    "risk_left": risk_left_today,
+                    "risk_left": available_risk - risk_used_today,
                     "pl_target": pl_target,
                     "todays_total_pl": todays_total_pl,
                     "todays_total_pl_percent": todays_total_pl_percent,
@@ -82,8 +97,40 @@ async def fetch_and_broadcast_data(mt5_handler: MT5Handler, supabase_handler: He
                     "current_tick": mt5_handler.get_current_tick(SESSION_STATE.get('subscribed_symbol', 'XAUUSD')) or {'bid': 0, 'ask': 0},
                     "open_positions_total_profit": positions_df['Profit'].sum() if not positions_df.empty else 0.0,
                     "open_positions_total_risk": total_open_risk,
-                    "history_total_profit": realized_pl_today
+                    "history_total_profit": realized_pl_today,
+                    "events": []
                 }
+
+                # Risk Alert Triggers with Severity
+                risk_used_percent = (risk_used_today / available_risk * 100) if available_risk > 0 else 0
+                
+                if 80 <= risk_used_percent < 100 and not SESSION_STATE["session_flags"]["risk_warned_80"]:
+                    event = {"type": "notification", "level": "warning", "title": "RISK WARNING", "message": f"Daily risk used is now at {risk_used_percent:.1f}%.", "is_critical": False}
+                    payload["events"].append(event)
+                    SESSION_STATE["session_flags"]["risk_warned_80"] = True
+
+                if risk_used_percent >= 100 and not SESSION_STATE["session_flags"]["risk_reached_100"]:
+                    event = {"type": "notification", "level": "danger", "title": "RISK LIMIT REACHED", "message": "You have reached your maximum daily loss limit.", "is_critical": True}
+                    payload["events"].append(event)
+                    SESSION_STATE["session_flags"]["risk_reached_100"] = True
+                
+                if risk_used_percent < 80:
+                    SESSION_STATE["session_flags"]["risk_warned_80"] = False
+
+                # Trade Event Triggers with Severity
+                if not history_df.empty and len(history_df) > len(previous_history_df):
+                    latest_trade = history_df.iloc[-1]
+                    trade_profit = latest_trade['Profit']
+                    trade_symbol = latest_trade['Symbol']
+                    level = "success" if trade_profit >= 0 else "danger"
+                    title = "Trade Closed"
+                    message = f"{trade_symbol} closed with a result of ${trade_profit:.2f}."
+                    
+                    event = {"type": "notification", "level": level, "title": title, "message": message, "is_critical": False}
+                    payload["events"].append(event)
+                
+                previous_history_df = history_df.copy()
+
             else:
                 payload = {"status": SESSION_STATE["status"], "suggested_balance": SESSION_STATE["suggested_balance"]}
             
@@ -94,18 +141,21 @@ async def fetch_and_broadcast_data(mt5_handler: MT5Handler, supabase_handler: He
         except Exception as e:
             print(f"ERROR in broadcast loop: {e}")
             traceback.print_exc()
-            error_payload = {
-                "status": "ERROR_STATE",
-                "error": {
-                    "title": "Backend System Error",
-                    "message": f"A critical error occurred: {str(e)}. The system is attempting to recover."
-                }
+            # Error Handling with Severity
+            payload = {
+                "status": "SESSION_ACTIVE", 
+                "events": [{
+                    "type": "notification",
+                    "level": "danger",
+                    "title": "System Critical Error",
+                    "message": f"Connection issue: {str(e)}. Attempting to recover.",
+                    "is_critical": True
+                }]
             }
             if CONNECTED_CLIENTS:
-                await asyncio.gather(*(client.send(json.dumps(error_payload, default=json_converter)) for client in CONNECTED_CLIENTS))
+                await asyncio.gather(*(client.send(json.dumps(payload, default=json_converter)) for client in CONNECTED_CLIENTS))
             await asyncio.sleep(5)
 
-# --- The rest of the file (listen_to_client, main, etc.) remains unchanged ---
 async def listen_to_client(websocket, mt5_handler: MT5Handler, supabase_handler: HeadlessSupabaseHandler):
     async for message in websocket:
         try:
@@ -117,6 +167,11 @@ async def listen_to_client(websocket, mt5_handler: MT5Handler, supabase_handler:
                     success = supabase_handler.set_daily_opening_balance(SESSION_STATE["portfolio_id"], SESSION_STATE["mt5_account_id"], user_confirmed_balance) if not SESSION_STATE["is_resuming_session"] else True
                     if success:
                         SESSION_STATE.update({"opening_balance": user_confirmed_balance, "status": "SESSION_ACTIVE", "session_start_time_utc": mt5_handler._get_start_of_trading_day_utc()})
+                        # --- [ADDED] Phase 1.1: Reset flags on new session ---
+                        SESSION_STATE["session_flags"]["risk_warned_80"] = False
+                        SESSION_STATE["session_flags"]["risk_reached_100"] = False
+                        global previous_history_df
+                        previous_history_df = pd.DataFrame()
                         print(f"\n✅ SESSION ACTIVATED for account {SESSION_STATE['mt5_account_id']}\n")
                     else: print("--- [CRITICAL DATABASE ERROR] Failed to set daily opening balance in Supabase.")
             elif event == "CALCULATE_LOT_REQUEST":
