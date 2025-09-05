@@ -1,0 +1,417 @@
+// main.js (อัปเกรดการจัดการ Symbol และ Chart)
+document.addEventListener('DOMContentLoaded', () => {
+
+    // SECTION 1: INJECT TEMPLATES ... (คงเดิม)
+    document.getElementById('hud-bar').appendChild(document.getElementById('hud-bar-template').content.cloneNode(true));
+    document.getElementById('battle-planner-col').appendChild(document.getElementById('battle-planner-template').content.cloneNode(true));
+    document.getElementById('analysis-col').appendChild(document.getElementById('analysis-template').content.cloneNode(true));
+    document.getElementById('bottom-bar').appendChild(document.getElementById('bottom-bar-template').content.cloneNode(true));
+
+    // SECTION 2: DEFINE SELECTORS ... (คงเดิม)
+    const selectors = {
+        body: document.body,
+        ignitionModule: document.getElementById('ignition-module'),
+        cockpitContainer: document.getElementById('cockpit-container'),
+        startTradingBtn: document.getElementById('startTradingBtn'),
+        openingBalanceInput: document.getElementById('openingBalanceInput'),
+        liveEquityValue: document.getElementById('live-equity-value'),
+        dailyPlNumbers: document.getElementById('daily-pl-numbers'),
+        riskLeftValue: document.getElementById('risk-left-value'),
+        riskUsedDisplay: document.getElementById('risk-used-display'),
+        riskAvailableText: document.getElementById('risk-available-text'),
+        riskProgressBar: document.getElementById('risk-progress-bar'),
+        sessionPlValue: document.getElementById('session-pl-value'),
+        plTargetValue: document.getElementById('pl-target-value'),
+        openingBalanceDisplay: document.getElementById('opening-balance-display'),
+        sessionPlPercent: document.getElementById('session-pl-percent'),
+        sessionPlProgressBar: document.getElementById('session-pl-progress-bar'),
+        riskDial: document.getElementById('risk-dial'),
+        openPositionsTableBody: document.getElementById('open-positions-tbody'),
+        tradeHistoryTableBody: document.getElementById('trade-history-tbody'),
+        symbolSelect: document.getElementById('symbol-select'),
+        orderTypeSelect: document.getElementById('order-type-hidden'),
+        entryPriceGroup: document.getElementById('entry-price-group'),
+        entryPriceInput: document.getElementById('entry-price'),
+        stopLossInput: document.getElementById('stop-loss'),
+        takeProfitInput: document.getElementById('take-profit'),
+        calculateBtn: document.getElementById('calculate-btn'),
+        armBtn: document.getElementById('arm-btn'),
+        executeBtn: document.getElementById('execute-btn'),
+        potentialLossValue: document.getElementById('potential-loss-value'),
+        potentialLossPercent: document.getElementById('potential-loss-percent'),
+        potentialProfitValue: document.getElementById('potential-profit-value'),
+        rrRatioValue: document.getElementById('rr-ratio-value'),
+        lotSizeInput: document.getElementById('lot-size-input'),
+        tpslCheckbox: document.getElementById('tpsl-checkbox'),
+        hudStatusIndicator: document.getElementById('hud-status-indicator'),
+        portfolioNameDisplay: document.getElementById('portfolio-name-display'),
+        mt5AccountDisplay: document.getElementById('mt5-account-display'),
+        totalOpenRisk: document.getElementById('total-open-risk'),
+        totalOpenRr: document.getElementById('total-open-rr'),
+        totalOpenProfit: document.getElementById('total-open-profit'),
+        totalHistoryProfit: document.getElementById('total-history-profit'),
+        plToTargetBar: document.getElementById('pl-to-target-bar'),
+        mainView: document.getElementById('main-view'),
+        leftCol: document.getElementById('left-col'),
+        battlePlannerCol: document.getElementById('battle-planner-col'),
+        analysisCol: document.getElementById('analysis-col'),
+        splitter1: document.getElementById('splitter1'),
+        splitter2: document.getElementById('splitter2'),
+        hSplitter: document.getElementById('h-splitter'),
+        bottomBar: document.getElementById('bottom-bar'),
+        bpFlyoutTab: document.getElementById('bp-flyout-tab'),
+        anFlyoutTab: document.getElementById('an-flyout-tab'),
+        battlePlannerCard: document.getElementById('battle-planner-expander'),
+        analysisExpander: document.getElementById('analysis-expander'),
+        rptLimitValue: document.getElementById('rpt-limit-value'),
+        rptAvailableValue: document.getElementById('rpt-available-value')
+    };
+
+    // SECTION 3: GLOBAL STATE & WEBSOCKET ... (คงเดิม)
+    let AppState = {};
+    let tradingViewWidget = null;
+    let lastCalculation = {};
+    let animationTimeout = null;
+    let displayMode = 'DOLLAR';
+    const socket = new WebSocket('ws://localhost:5555');
+
+    socket.onopen = () => { if (selectors.hudStatusIndicator) { selectors.hudStatusIndicator.textContent = '● Connected'; selectors.hudStatusIndicator.style.color = 'var(--color-success)'; } };
+    socket.onclose = () => { if (selectors.hudStatusIndicator) { selectors.hudStatusIndicator.textContent = '● Disconnected'; selectors.hudStatusIndicator.style.color = 'var(--color-danger)'; } if (selectors.ignitionModule) selectors.ignitionModule.style.display = 'flex'; if (selectors.cockpitContainer) selectors.cockpitContainer.classList.add('hidden'); };
+    socket.onerror = () => { if (selectors.hudStatusIndicator) { selectors.hudStatusIndicator.textContent = '● Error'; selectors.hudStatusIndicator.style.color = 'var(--color-danger)'; } };
+    socket.onmessage = (event) => {
+        const serverData = JSON.parse(event.data);
+        if (serverData.status === "READY_TO_START") {
+            selectors.openingBalanceInput.readOnly = false;
+            selectors.openingBalanceInput.placeholder = "Enter Opening Balance";
+            if (selectors.openingBalanceInput) selectors.openingBalanceInput.value = serverData.suggested_balance.toFixed(2);selectors.openingBalanceInput.readOnly = false;
+            if (selectors.startTradingBtn) { selectors.startTradingBtn.disabled = false; selectors.startTradingBtn.textContent = "START TRADING DAY"; }
+        } else if (serverData.status === "SESSION_ACTIVE") {
+            if (selectors.ignitionModule && selectors.ignitionModule.style.display !== 'none') {
+                selectors.ignitionModule.style.display = 'none';
+                if (selectors.cockpitContainer) selectors.cockpitContainer.classList.remove('hidden');
+            }
+            updateFullDashboard(serverData);
+        }
+        if (serverData.event === "CALCULATE_LOT_RESPONSE") {
+            lastCalculation = serverData.payload;
+            handleCalculationResponse(serverData.payload);
+        }
+    };
+    
+    // SECTION 4: UI RENDERING FUNCTIONS
+    function renderUI() {
+    if (!AppState.status) return; 
+    updateFullDashboard(AppState);
+    }
+
+    function updateFullDashboard(data) {
+        AppState = { ...AppState, ...data };
+        if (selectors.symbolSelect && selectors.symbolSelect.options.length <= 1 && AppState.all_symbols) { initSymbolSelect(AppState.all_symbols); }
+        
+        const profitColor = 'var(--color-success)', lossColor = 'var(--color-danger)';
+        const oneRValue = data.rpt_limit_usd || 1;
+        const formatValue = (value) => {
+                if (displayMode === 'R_UNIT') {
+                    const rValue = value / oneRValue;
+                    return `${rValue >= 0 ? '+' : ''}${rValue.toFixed(2)}R`;
+                }
+                return `$${(value || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            };
+
+        if (selectors.portfolioNameDisplay) selectors.portfolioNameDisplay.textContent = data.portfolio_context?.PortfolioName || 'N/A';
+        if (selectors.mt5AccountDisplay) selectors.mt5AccountDisplay.textContent = data.mt5_account_id || 'N/A';       
+        if (selectors.liveEquityValue) { 
+        selectors.liveEquityValue.textContent = `$${(data.equity || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`; // Equity แสดงเป็น $ เสมอ
+        selectors.liveEquityValue.style.color = data.daily_pl_total_usd > 0 ? profitColor : data.daily_pl_total_usd < 0 ? lossColor : 'inherit';}
+        if (selectors.dailyPlNumbers) { 
+        selectors.dailyPlNumbers.textContent = `${formatValue(data.daily_pl_total_usd)} (${(data.daily_pl_total_percent || 0).toFixed(2)}%)`; 
+        selectors.dailyPlNumbers.style.color = data.daily_pl_total_usd > 0 ? profitColor : data.daily_pl_total_usd < 0 ? lossColor : 'inherit';}        
+        const plToTargetPercent = data.pl_target > 0 ? (data.daily_pl_total_usd / data.pl_target) * 100 : 0;
+        if (selectors.plToTargetBar) selectors.plToTargetBar.style.width = `${Math.min(Math.max(plToTargetPercent, 0), 100)}%`;
+        if (selectors.riskAvailableText) selectors.riskAvailableText.textContent = `Limit: $${(data.ddl_limit_usd || 0).toFixed(2)}`;
+        const riskUsedPercent = data.ddl_limit_usd > 0 ? (data.ddl_used_usd / data.ddl_limit_usd) * 100 : 0;
+        if (selectors.riskUsedDisplay) selectors.riskUsedDisplay.textContent = `Used: $${(data.ddl_used_usd || 0).toFixed(2)} (${riskUsedPercent.toFixed(2)}%)`;
+        if (selectors.riskProgressBar) selectors.riskProgressBar.style.width = `${Math.min(riskUsedPercent, 100)}%`;
+        if (selectors.riskLeftValue) {
+            if (data.ddl_left_usd <= 0) { 
+                selectors.riskLeftValue.textContent = "LIMIT REACHED"; 
+                selectors.riskLeftValue.style.color = lossColor; 
+                if (selectors.calculateBtn) selectors.calculateBtn.disabled = true;
+            } else { 
+                selectors.riskLeftValue.textContent = formatValue(data.ddl_left_usd); 
+                selectors.riskLeftValue.style.color = 'inherit'; 
+                if (selectors.calculateBtn) selectors.calculateBtn.disabled = false; 
+            }
+        }
+        if (selectors.openingBalanceDisplay) selectors.openingBalanceDisplay.textContent = `Balance: $${(data.opening_balance || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        if (selectors.sessionPlValue) { 
+                selectors.sessionPlValue.textContent = formatValue(data.realized_pl); 
+                selectors.sessionPlValue.style.color = data.realized_pl > 0 ? profitColor : data.realized_pl < 0 ? lossColor : 'inherit'; 
+            }
+        if (selectors.plTargetValue) selectors.plTargetValue.textContent = `/ Target: ${formatValue(data.pl_target)}`;        
+        const plPercentOfTarget = data.pl_target > 0 ? (data.realized_pl / data.pl_target) * 100 : 0;
+        if (selectors.sessionPlProgressBar) selectors.sessionPlProgressBar.style.width = `${Math.min(Math.max(plPercentOfTarget, 0), 100)}%`;
+        if (selectors.sessionPlPercent) selectors.sessionPlPercent.textContent = `${plPercentOfTarget.toFixed(2)}%`;
+        if (selectors.rptLimitValue) selectors.rptLimitValue.textContent = formatValue(data.rpt_limit_usd);
+        if (selectors.rptAvailableValue) {
+                selectors.rptAvailableValue.textContent = formatValue(data.rpt_available_usd);
+                selectors.rptAvailableValue.style.color = (data.rpt_available_usd > 0) ? profitColor : lossColor;
+        }
+
+        renderTable(selectors.openPositionsTableBody, data.open_positions, createOpenPositionRow, 11, "No active orders");
+    renderTable(selectors.tradeHistoryTableBody, data.trade_history, createTradeHistoryRow, 5, "No trade history for today");
+    
+    if (selectors.totalOpenRisk) {
+        const totalRisk = data.open_positions_total_risk || 0;
+        const totalRiskPercent = data.total_open_risk_percent || 0;
+        selectors.totalOpenRisk.textContent = `${formatValue(totalRisk)} (${totalRiskPercent.toFixed(2)}%)`;
+    }
+
+    if (selectors.totalOpenProfit) {
+        selectors.totalOpenProfit.textContent = formatValue(data.open_positions_total_profit);
+        selectors.totalOpenProfit.style.color = data.open_positions_total_profit >= 0 ? profitColor : lossColor;
+    }
+    
+    const totalHistoryProfit = data.history_total_profit || 0;
+    if (selectors.totalHistoryProfit) {
+        selectors.totalHistoryProfit.textContent = formatValue(totalHistoryProfit);
+        selectors.totalHistoryProfit.style.color = totalHistoryProfit >= 0 ? profitColor : lossColor;
+    }
+    }
+
+    function renderTable(tbody, data, rowCreator, colspan, emptyMessage) { if (!tbody) return; tbody.innerHTML = ''; if (data.length === 0) { tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center; color: var(--color-text-secondary);">${emptyMessage}</td></tr>`; return; } data.forEach(item => tbody.insertAdjacentHTML('beforeend', rowCreator(item))); }
+    
+    // [FIX] อัปเดตฟังก์ชันสร้างแถวให้แสดง Risk %
+    function createOpenPositionRow(pos) {
+        const profitColor = pos.Profit >= 0 ? 'text-profit' : 'text-loss';
+        const oneRValue = AppState.rpt_limit_usd || 1;
+
+        // Helper function เฉพาะสำหรับฟังก์ชันนี้
+        const formatValue = (value) => {
+            if (displayMode === 'R_UNIT') {
+                const rValue = value / oneRValue;
+                return `${rValue >= 0 ? '+' : ''}${rValue.toFixed(2)}R`;
+            }
+            return `$${(value || 0).toFixed(2)}`;
+        };
+
+        const riskPercentText = pos.risk_percent ? `(${(pos.risk_percent).toFixed(2)}%)` : '';
+        
+        return `<tr>
+            <td>${pos.Time || ''}</td>
+            <td>${pos.Symbol}</td>
+            <td>${pos.Type}</td>
+            <td>${pos.Volume}</td>
+            <td>${pos.Price}</td>
+            <td>${pos.SL || ''}</td>
+            <td>${pos.TP || ''}</td>
+            <td class="text-loss">${formatValue(pos.position_risk)} ${riskPercentText}</td>
+            <td>${(pos.position_rr || 0).toFixed(2)}</td>
+            <td class="${profitColor}">${formatValue(pos.Profit)}</td>
+            <td><button class="btn-close-pos" data-ticket="${pos.Ticket}">Close</button></td>
+        </tr>`;
+    }
+
+    function createTradeHistoryRow(trade) {
+        const profitColor = trade.Profit >= 0 ? 'text-profit' : 'text-loss';
+        const oneRValue = AppState.rpt_limit_usd || 1;
+
+        // Helper function
+        const formatValue = (value) => {
+            if (displayMode === 'R_UNIT') {
+                const rValue = value / oneRValue;
+                return `${rValue >= 0 ? '+' : ''}${rValue.toFixed(2)}R`;
+            }
+            return `$${(value || 0).toFixed(2)}`;
+        };
+
+        return `<tr>
+            <td>${trade['Close Time'] || ''}</td>
+            <td>${trade.Symbol || ''}</td>
+            <td>${trade.Type || ''}</td>
+            <td>${trade.Volume || 0}</td>
+            <td class="${profitColor}">${formatValue(trade.Profit)}</td>
+        </tr>`;
+    }    
+    // [FIX #12] อัปเกรดฟังก์ชันให้ฉลาดขึ้น สามารถเลือก Prefix ของ TradingView ได้เอง
+    function renderTradingViewWidget(symbol) {
+        if (!symbol) return;
+        const container = document.getElementById("tradingview-widget-container");
+        if (!container) return;
+        
+        container.innerHTML = '';
+        let tvSymbol = '';
+        const cleanSymbol = symbol.replace(/_$/, '');
+
+        // --- Smart Prefix Logic ---
+        if (['XAUUSD', 'XAGUSD'].includes(cleanSymbol)) {
+            tvSymbol = `OANDA:${cleanSymbol}`;
+        } else if (cleanSymbol.includes('WTI') || cleanSymbol.includes('USOIL')) {
+            tvSymbol = 'TVC:USOIL';
+        } else if (cleanSymbol.includes('BRN') || cleanSymbol.includes('UKOIL')) {
+            tvSymbol = 'TVC:UKOIL';
+        } else if (cleanSymbol.includes('SP500') || cleanSymbol.includes('US500')) {
+            tvSymbol = 'TVC:SPX';
+        } else if (cleanSymbol.includes('NQ100') || cleanSymbol.includes('US100')) {
+            tvSymbol = 'TVC:NDX';
+        } else if (cleanSymbol.includes('DJI30') || cleanSymbol.includes('US30')) {
+            tvSymbol = 'TVC:DJI';
+        } else if (['ETHUSD', 'BTCUSD'].includes(cleanSymbol)) {
+            tvSymbol = `COINBASE:${cleanSymbol}`;
+        } else {
+            // Default for other Forex pairs
+            tvSymbol = `OANDA:${cleanSymbol}`;
+        }
+        
+        console.log(`Broker Symbol: ${symbol} -> TradingView Symbol: ${tvSymbol}`);
+
+        try {
+            tradingViewWidget = new TradingView.widget({
+                "container_id": "tradingview-widget-container", "autosize": true, "symbol": tvSymbol,
+                "interval": "15", "timezone": "Etc/UTC", "theme": "dark", "style": "1", "locale": "en",
+                "enable_publishing": false, "hide_side_toolbar": false, "details": true,
+                "studies": ["MASimple@tv-basicstudies"]
+            });
+        } catch (e) {
+            console.error("TradingView Widget Error:", e);
+            container.innerHTML = "Failed to load TradingView Widget.";
+        }
+    }
+    
+    // [FIX #13] อัปเกรดฟังก์ชันกรอง Symbol ให้ฉลาดขึ้น
+    function initSymbolSelect(symbols) {
+        if (!selectors.symbolSelect) return;
+        
+        const nonForexWhitelist = ['XAU', 'WTI', 'BRN', 'NG', 'DJI30', 'NQ100', 'SP500', 'ETH', 'BTC'];
+        
+        const filteredSymbols = symbols.filter(symbol => {
+            // 1. Keep non-forex items from the whitelist
+            if (nonForexWhitelist.some(keyword => symbol.includes(keyword))) {
+                return true;
+            }
+            // 2. For Forex pairs (assuming 6 chars like EURUSD or 7 with _), keep only USD pairs
+            const cleanSymbol = symbol.replace(/_$/, '');
+            if (cleanSymbol.length === 6 && cleanSymbol.includes('USD')) {
+                return true;
+            }
+            return false;
+        });
+
+        while (selectors.symbolSelect.options.length > 1) { selectors.symbolSelect.remove(1); }
+        filteredSymbols.forEach(s => selectors.symbolSelect.add(new Option(s.replace(/_$/, ''), s)));
+        $(selectors.symbolSelect).select2({ theme: "obsidian", placeholder: "Select a symbol", allowClear: true });
+        
+        $(selectors.symbolSelect).off('change').on('change', function() { renderTradingViewWidget(this.value); resetCalculator(); });
+        
+        const defaultSymbol = filteredSymbols.find(s => s.includes('XAUUSD')) || (filteredSymbols.length > 0 ? filteredSymbols[0] : null);
+        if (defaultSymbol) { $(selectors.symbolSelect).val(defaultSymbol).trigger('change'); }
+    }
+
+    function handleCalculationResponse(payload) { if (selectors.lotSizeInput) selectors.lotSizeInput.value = (payload.lot_size || 0).toFixed(2); const dailyRiskCard = document.getElementById('daily-risk-card'); if (payload.lot_size > 0) { if (selectors.armBtn) selectors.armBtn.disabled = false; clearTimeout(animationTimeout); dailyRiskCard?.classList.add('flash-warning'); animationTimeout = setTimeout(() => { dailyRiskCard?.classList.remove('flash-warning'); if (selectors.armBtn) selectors.armBtn.classList.add('standby-pulse'); }, 1500); } else { if (selectors.armBtn) selectors.armBtn.disabled = true; alert("RISK LIMIT EXCEEDED..."); } updateCalculationReadout(); }
+    function updateCalculationReadout() { if (!lastCalculation.tick_value || lastCalculation.tick_value === 0) { resetCalculator(false); return; } const lotSize = parseFloat(selectors.lotSizeInput.value) || 0; const loss = lotSize * (lastCalculation.sl_pips || 0) * lastCalculation.tick_value; const profit = lotSize * (lastCalculation.tp_pips || 0) * lastCalculation.tick_value; if(selectors.potentialLossValue) selectors.potentialLossValue.textContent = `-$${loss.toFixed(2)}`; if(selectors.potentialProfitValue) selectors.potentialProfitValue.textContent = `+$${profit.toFixed(2)}`; if(selectors.rrRatioValue) selectors.rrRatioValue.textContent = loss > 0 ? (profit / loss).toFixed(2) : '-'; }
+
+   // SECTION 5: LAYOUT MANAGER
+    const layoutManager = {
+        init() {
+            selectors.battlePlannerCol.classList.add('panel-column');
+            selectors.analysisCol.classList.add('panel-column');
+            this.initSplitter(selectors.splitter1, selectors.leftCol, selectors.battlePlannerCol);
+            this.initSplitter(selectors.splitter2, selectors.battlePlannerCol, selectors.analysisCol);
+            this.initSplitter(selectors.hSplitter, selectors.mainView, selectors.bottomBar);
+        },
+        // [FIX #1] อัปเกรดฟังก์ชัน togglePanel ให้ซ่อน Splitter ด้วย
+        togglePanel(panelElement, bodyClass, associatedSplitter) {
+            if (panelElement) panelElement.classList.toggle('collapsed');
+            if (associatedSplitter) associatedSplitter.classList.toggle('collapsed'); // ซ่อน/แสดง splitter
+            if (selectors.body) selectors.body.classList.toggle(bodyClass);
+            setTimeout(() => window.dispatchEvent(new Event('resize')), 350);
+        },
+        initSplitter(splitterEl, elA, elB) {
+            if (!splitterEl || !elA || !elB) return;
+            const handleMouseMove = (e) => {
+                const isVertical = !splitterEl.id.startsWith('h-');
+                const rectA = elA.getBoundingClientRect();
+                if (isVertical) {
+                    const totalFlexWidth = elA.offsetWidth + elB.offsetWidth;
+                    const newBasisA = e.clientX - rectA.left;
+                    if (newBasisA > 50 && (totalFlexWidth - newBasisA) > 50) {
+                        elA.style.flexBasis = `${newBasisA}px`;
+                        elB.style.flexBasis = `${totalFlexWidth - newBasisA}px`;
+                    }
+                } else {
+                    const totalFlexHeight = elA.offsetHeight + elB.offsetHeight;
+                    const newBasisA = e.clientY - rectA.top;
+                    if (newBasisA > 100 && (totalFlexHeight - newBasisA) > 100) {
+                        elA.style.flexBasis = `${newBasisA}px`;
+                        elB.style.flexBasis = `${totalFlexHeight - newBasisA}px`;
+                    }
+                }
+            };
+            const handleMouseUp = () => { document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', handleMouseUp); };
+            splitterEl.addEventListener('mousedown', (e) => { e.preventDefault(); document.addEventListener('mousemove', handleMouseMove); document.addEventListener('mouseup', handleMouseUp); });
+        }
+    };
+
+    // SECTION 6: EVENT LISTENERS
+    function attachEventListeners() {
+        selectors.startTradingBtn?.addEventListener('click', () => { const balanceValue = selectors.openingBalanceInput.value; if (balanceValue && !isNaN(parseFloat(balanceValue))) { socket.send(JSON.stringify({ event: "START_SESSION", payload: { openingBalance: parseFloat(balanceValue) } })); } else { alert("Please enter a valid opening balance."); } });
+        selectors.riskDial?.addEventListener('change', (e) => { socket.send(JSON.stringify({ event: "SET_DDL_PERCENT", payload: { ddl_percent: parseFloat(e.target.value) }})); });
+        document.getElementById('live-equity-card')?.addEventListener('click', (e) => { if (e.target.closest('#notification-area')) return; displayMode = (displayMode === 'DOLLAR') ? 'R_UNIT' : 'DOLLAR'; renderUI(); });
+        selectors.calculateBtn?.addEventListener('click', () => { resetCalculator(false); if (!selectors.tpslCheckbox.checked || !selectors.stopLossInput.value || parseFloat(selectors.stopLossInput.value) <= 0) { alert("Please check the TP/SL box and enter a valid Stop Loss price."); return; } const command = { event: "CALCULATE_LOT_REQUEST", payload: { symbol: selectors.symbolSelect.value, sl_price: parseFloat(selectors.stopLossInput.value) || 0, tp_price: parseFloat(selectors.takeProfitInput.value) || 0, order_type_str: selectors.orderTypeSelect.value, entry_price: parseFloat(selectors.entryPriceInput.value) || 0 } }; if (!command.payload.symbol) { alert("Please select a Symbol."); return; } socket.send(JSON.stringify(command)); });
+        selectors.lotSizeInput?.addEventListener('input', updateCalculationReadout);
+        selectors.armBtn?.addEventListener('click', () => { if (selectors.armBtn) { selectors.armBtn.classList.remove('standby-pulse'); selectors.armBtn.disabled = true; } if (selectors.executeBtn) { selectors.executeBtn.disabled = false; selectors.executeBtn.classList.add('urgent-pulse'); } });
+        selectors.executeBtn?.addEventListener('click', () => { const orderDetails = { type: selectors.orderTypeSelect.value, lot_size: parseFloat(selectors.lotSizeInput.value), symbol: selectors.symbolSelect.value, sl: parseFloat(selectors.stopLossInput.value) || 0, tp: parseFloat(selectors.takeProfitInput.value) || 0, entry_price: parseFloat(selectors.entryPriceInput.value) || 0 }; if (orderDetails.lot_size <= 0) { alert("Invalid Lot Size."); return; } socket.send(JSON.stringify({ event: "EXECUTE_TRADE", payload: orderDetails })); resetCalculator(); });
+        document.querySelectorAll('.tab-btn').forEach(button => { button.addEventListener('click', () => { document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active')); button.classList.add('active'); const category = button.dataset.value; const isMarket = category === 'MARKET'; if (selectors.entryPriceGroup) selectors.entryPriceGroup.classList.toggle('hidden', isMarket); if (selectors.orderTypeSelect) selectors.orderTypeSelect.value = isMarket ? 'MARKET_BUY' : (category === 'LIMIT' ? 'BUY_LIMIT' : 'BUY_STOP'); resetCalculator(); }); });
+        selectors.tpslCheckbox?.addEventListener('change', () => { document.querySelectorAll('.tpsl-group').forEach(g => g.style.display = selectors.tpslCheckbox.checked ? 'flex' : 'none'); resetCalculator(); });
+        
+        // [FIX #1] อัปเดต Event Listeners ให้ส่ง Splitter ที่เกี่ยวข้องเข้าไปด้วย
+        if (selectors.battlePlannerCard) selectors.battlePlannerCard.querySelector('.card-header').addEventListener('click', () => layoutManager.togglePanel(selectors.battlePlannerCol, 'bp-collapsed', selectors.splitter1));
+        if (selectors.analysisExpander) selectors.analysisExpander.querySelector('.card-header').addEventListener('click', () => layoutManager.togglePanel(selectors.analysisCol, 'an-collapsed', selectors.splitter2));
+        if (selectors.bpFlyoutTab) selectors.bpFlyoutTab.addEventListener('click', () => layoutManager.togglePanel(selectors.battlePlannerCol, 'bp-collapsed', selectors.splitter1));
+        if (selectors.anFlyoutTab) selectors.anFlyoutTab.addEventListener('click', () => layoutManager.togglePanel(selectors.analysisCol, 'an-collapsed', selectors.splitter2));
+        
+        document.getElementById('live-equity-card')?.addEventListener('click', (e) => {
+                if (e.target.closest('#notification-area')) return; // ไม่ทำงานถ้าคลิกที่กระดิ่ง
+                displayMode = (displayMode === 'DOLLAR') ? 'R_UNIT' : 'DOLLAR';
+                renderUI(); // เรียกฟังก์ชันวาดหน้าจอใหม่
+            });        
+        // [FIX #2] เปลี่ยน Logic การทำงานของแท็บด้านล่างให้เป็นอิสระ
+        document.querySelectorAll('.bottom-header-btn').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const section = document.getElementById(tab.dataset.target);
+                if (!section) return;
+                const content = section.querySelector('.expander-content');
+                
+                // สลับ (toggle) สถานะ active ของปุ่มและส่วนแสดงผล
+                tab.classList.toggle('active');
+                section.classList.toggle('active');
+
+                // กำหนดความสูงของ content ตามสถานะ active
+                if (section.classList.contains('active')) {
+                    if (content) content.style.maxHeight = content.scrollHeight + "px";
+                } else {
+                    if (content) content.style.maxHeight = null;
+                }
+            });
+        });
+    }
+
+    // SECTION 7: INITIALIZATION
+    layoutManager.init();
+    attachEventListeners();
+    // ทำให้ Active Orders เปิดเป็นค่าเริ่มต้น
+    const notificationBell = document.getElementById('notification-bell');
+    if (notificationBell) {
+        notificationBell.addEventListener('click', () => {
+            // This is a placeholder for now. In the future, this will open a notification panel.
+            console.log("Notification bell clicked!");
+            alert("Displaying notifications...");
+        });
+    }
+    const initialTab = document.querySelector('.bottom-header-btn[data-target="active-orders-section"]');
+    if (initialTab) initialTab.click();
+
+    if (selectors.tpslCheckbox) selectors.tpslCheckbox.dispatchEvent(new Event('change'));
+    const activeTab = document.querySelector('.tab-btn.active');
+    if (activeTab) activeTab.click();
+});

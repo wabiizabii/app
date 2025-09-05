@@ -1,7 +1,7 @@
-# core/mt5_handler.py
+# core/mt5_handler.py (The Definitive Version)
 import MetaTrader5 as mt5
 import pandas as pd
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timedelta
 import numpy as np
 import pytz
 from config import settings
@@ -12,7 +12,8 @@ class MT5Handler:
     def __init__(self):
         self._is_connected = False
         self.account_id = None
-        self.BROKER_TZ = pytz.timezone('Etc/GMT-3') 
+        # NOTE: ตั้งค่า Timezone ของ Broker ให้ถูกต้อง (ส่วนใหญ่เป็น GMT+3)
+        self.BROKER_TZ = pytz.timezone(settings.BROKER_TIMEZONE) 
 
     def initialize_connection(self):
         if self._is_connected: return True
@@ -57,7 +58,12 @@ class MT5Handler:
             symbol_info = mt5.symbol_info(position.symbol)
             request = { "action": mt5.TRADE_ACTION_DEAL, "symbol": position.symbol, "volume": position.volume, "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY, "position": position.ticket, "price": symbol_info.bid if position.type == mt5.ORDER_TYPE_BUY else symbol_info.ask, "deviation": 20, "magic": 12345, "comment": "Dashboard Close", "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC }
             result = mt5.order_send(request)
-            return result._asdict() if result else {"error": "Order Send Failed", "last_error": mt5.last_error()}
+            if result:
+                print(f"Position {ticket} close order sent successfully. Result code: {result.retcode}")
+                return {"success": True, "result": result._asdict()}
+            else:
+                print(f"Failed to send close order for position {ticket}. Error: {mt5.last_error()}")
+                return {"error": "Order Send Failed", "last_error": mt5.last_error()}
         except Exception as e: return {"error": str(e)}
 
     def get_open_positions(self):
@@ -87,39 +93,54 @@ class MT5Handler:
         df.rename(columns={'ticket': 'Ticket', 'symbol': 'Symbol', 'volume_current': 'Lots', 'price_open': 'Entry Price', 'sl': 'SL', 'tp': 'TP'}, inplace=True)
         return df[['Ticket', 'Time', 'Symbol', 'Type', 'Lots', 'Entry Price', 'SL', 'TP']]
 
-        # [CORRECTED V3] The most robust trade history logic
+    # [DEFINITIVE FIX #4] The final, most accurate trade history logic
+
     def get_trade_history(self, start_date, end_date):
         if not self._is_connected:
             return pd.DataFrame()
+        
         deals = mt5.history_deals_get(start_date, end_date)
         if deals is None or len(deals) == 0:
             return pd.DataFrame()
         
-        df = pd.DataFrame(list(deals), columns=deals[0]._asdict().keys())
+        columns = deals[0]._asdict().keys()
+        deals_df = pd.DataFrame(list(deals), columns=columns)
         
-        trade_deals = df[df['position_id'] != 0].copy()
-        if trade_deals.empty:
+        # --- [THE EXORCISM FIX V2] ---
+        # A REAL trade involves at least TWO deals: one IN and one OUT.
+        # We find all position_ids that have both IN and OUT deals.
+        
+        deals_in = deals_df[deals_df['entry'] == mt5.DEAL_ENTRY_IN]['position_id'].unique()
+        deals_out = deals_df[deals_df['entry'] == mt5.DEAL_ENTRY_OUT]['position_id'].unique()
+        
+        # The real, closed position_ids are the ones present in BOTH lists.
+        real_position_ids = np.intersect1d(deals_in, deals_out)
+        
+        if len(real_position_ids) == 0:
             return pd.DataFrame()
 
-        trade_deals['net_profit'] = trade_deals['profit'] + trade_deals['commission'] + trade_deals['swap']
-
+        # Filter the original deals_df to keep only the deals from real positions
+        trade_deals = deals_df[deals_df['position_id'].isin(real_position_ids)].copy()
+        
+        # Now we can safely group them
         summary = trade_deals.groupby('position_id').agg(
             Symbol=('symbol', 'first'),
-            Type=('type', 'first'),
             Volume=('volume', 'first'),
             Close_Time_Raw=('time', 'last'),
-            Profit=('net_profit', 'sum')
+            Net_Profit=('profit', 'sum'),
+            Commission=('commission', 'sum'),
+            Swap=('swap', 'sum'),
+            Position_Type=('type', 'first')
         ).reset_index()
 
-        if summary.empty:
-            return pd.DataFrame()
-
-        summary['Close Time'] = pd.to_datetime(summary['Close_Time_Raw'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%H:%M:%S')
+        summary['Profit'] = summary['Net_Profit'] + summary['Commission'] + summary['Swap']
+        summary['Type'] = summary['Position_Type'].map({0: 'Buy', 1: 'Sell'})
+        summary['Close Time'] = pd.to_datetime(summary['Close_Time_Raw'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%Y.%m.%d %H:%M:%S')
         
-        summary['Type'] = summary['Type'].map({mt5.DEAL_TYPE_BUY: 'Buy', mt5.DEAL_TYPE_SELL: 'Sell'})
+        final_df = summary[['Close Time', 'Symbol', 'Type', 'Volume', 'Profit']].sort_values(by='Close Time', ascending=True)
         
-        return summary[['Close Time', 'Symbol', 'Type', 'Volume', 'Profit']].sort_values(by='Close Time', ascending=True)
-    
+        return final_df
+ 
     def execute_trade(self, trade_details):
         try:
             symbol, order_type_str, lot_size, sl, tp, entry = trade_details.get('symbol'), trade_details.get('type'), float(trade_details.get('lot_size')), float(trade_details.get('sl', 0)), float(trade_details.get('tp', 0)), float(trade_details.get('entry_price', 0))
@@ -136,37 +157,41 @@ class MT5Handler:
         except Exception as e:
             return {"error": str(e)}
 
-    # --- [CORRECTED & CONSOLIDATED] New Calculation Engine ---
     def calculate_trade_metrics(self, symbol_properties: dict, order_type: int, risk_usd: float, entry_price: float, sl_price: float, tp_price: float):
-        results = {"lot_size": 0.0, "potential_loss_usd": 0.0, "potential_profit_usd": 0.0, "rr_ratio": 0.0}
+        results = {"lot_size": 0.0, "potential_loss_usd": 0.0, "potential_profit_usd": 0.0, "rr_ratio": 0.0, "sl_pips": 0, "tp_pips": 0, "tick_value": 0}
         if not self._is_connected or sl_price <= 0 or risk_usd <= 0: return results
 
         symbol = symbol_properties.get("symbol")
-        contract_size = symbol_properties.get("contract_size", 1)
-        lot_step = symbol_properties.get("lot_step", 0.01)
+        point = mt5.symbol_info(symbol).point
+        tick_value = mt5.symbol_info(symbol).trade_tick_value
 
         current_price = entry_price
         if current_price <= 0:
             tick = mt5.symbol_info_tick(symbol)
             if not tick: return results
             current_price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
-
-        stop_distance_price = abs(current_price - sl_price)
-        if stop_distance_price <= 0: return results
+            
+        sl_pips = abs(current_price - sl_price) / point
+        loss_per_lot = sl_pips * tick_value
         
-        loss_per_lot = stop_distance_price * contract_size
         if loss_per_lot <= 0: return results
         
+        lot_step = symbol_properties.get("lot_step", 0.01)
         lot_size = risk_usd / loss_per_lot
         lot_size = math.floor(lot_size / lot_step) * lot_step
-        if lot_size <= 0: return results
+        if lot_size < lot_step: return results
+
         results["lot_size"] = lot_size
+        results["sl_pips"] = sl_pips
+        results["tick_value"] = tick_value
 
         loss_calc_type = mt5.ORDER_TYPE_SELL if order_type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
         actual_loss = abs(mt5.order_calc_profit(loss_calc_type, symbol, lot_size, current_price, sl_price) or 0.0)
         results["potential_loss_usd"] = actual_loss
 
         if tp_price > 0:
+            tp_pips = abs(tp_price - current_price) / point
+            results["tp_pips"] = tp_pips
             actual_profit = abs(mt5.order_calc_profit(order_type, symbol, lot_size, current_price, tp_price) or 0.0)
             results["potential_profit_usd"] = actual_profit
             if actual_loss > 0:
