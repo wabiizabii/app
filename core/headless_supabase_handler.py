@@ -1,5 +1,4 @@
-# core/headless_supabase_handler.py (Final Corrected Logic Version)
-
+# core/headless_supabase_handler.py
 from supabase import create_client, Client
 from datetime import datetime, timezone
 
@@ -13,23 +12,26 @@ class HeadlessSupabaseHandler:
             print(f"CRITICAL (HEADLESS): Supabase client connection failed. Error: {e}")
 
     def get_portfolio_by_mt5_account_id(self, mt5_id: str):
-        """
-        [CORRECTED] Fetches a portfolio by its linked MT5 Account ID from the 'Portfolios' table.
-        """
         if not self.client or not mt5_id: return None
         try:
             response = self.client.table("Portfolios").select("*").eq("mt5_account_id", mt5_id).single().execute()
-            if response.data:
-                return response.data
-            return None
+            return response.data if response.data else None
         except Exception as e:
             print(f"ERROR (HEADLESS) in get_portfolio_by_mt5_account_id: {e}")
             return None
-        
+            
+    def get_portfolio_with_broker(self, mt5_id: str, broker_name: str):
+        if not self.client or not mt5_id or not broker_name: return None
+        try:
+            response = self.client.table("Portfolios").select("*").eq("mt5_account_id", mt5_id).eq("BrokerName", broker_name).single().execute()
+            return response.data if response.data else None
+        except Exception as e:
+            # This is expected to fail if not found, so only print real errors.
+            if "0 rows" not in str(e):
+                print(f"ERROR (HEADLESS) in get_portfolio_with_broker: {e}")
+            return None
+
     def insert_new_portfolio(self, portfolio_data: dict):
-        """
-        Inserts a new portfolio record into the 'Portfolios' table.
-        """
         if not self.client: return None, "Supabase client not initialized."
         try:
             response = self.client.table("Portfolios").insert(portfolio_data).execute()
@@ -41,56 +43,74 @@ class HeadlessSupabaseHandler:
             print(f"ERROR (HEADLESS) in insert_new_portfolio: {e}")
             return None, str(e)
 
-    # --- [REBUILT] Enforces 1-to-1 Check ---
-    def get_daily_opening_balance(self, portfolio_id: str, mt5_account_id: str):
-        """
-        [REBUILT] Gets the opening balance for today, strictly matching BOTH PortfolioID and mt5_account_id.
-        """
-        if not self.client: return None
-        today_utc_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    def update_portfolio_timezone(self, portfolio_id: str, offset: int):
+        if not self.client: return False
         try:
-            response = self.client.table("PortfolioDailyMetrics") \
-                .select("OpeningBalance") \
-                .eq("PortfolioID", portfolio_id) \
-                .eq("mt5_account_id", str(mt5_account_id)) \
-                .eq("Date", today_utc_str) \
-                .single() \
-                .execute()
-            
+            self.client.table("Portfolios").update({"TimezoneOffset": offset}).eq("PortfolioID", portfolio_id).execute()
+            print(f"SUCCESS (HEADLESS): Updated timezone for PortfolioID {portfolio_id} to {offset}")
+            return True
+        except Exception as e:
+            print(f"ERROR (HEADLESS) in update_portfolio_timezone: {e}")
+            return False
+
+    def get_daily_opening_balance(self, portfolio_id: str, mt5_account_id: str, broker_date_str: str):
+        if not self.client: return None
+        # [SYSTEM INTEGRITY FIX] Use the provided broker date string for lookup
+        try:
+            response = self.client.table("PortfolioDailyMetrics").select("OpeningBalance").eq("PortfolioID", portfolio_id).eq("mt5_account_id", str(mt5_account_id)).eq("Date", broker_date_str).single().execute()
             if response.data:
                 balance = response.data.get('OpeningBalance')
-                print(f"INFO (HEADLESS): Found existing opening balance in DB: {balance} for MT5 Account {mt5_account_id}")
+                print(f"INFO (HEADLESS): Found existing opening balance in DB: {balance} for MT5 Account {mt5_account_id} on date {broker_date_str}")
                 return balance
+            print(f"INFO (HEADLESS): No existing opening balance found in DB for {broker_date_str}")
             return None
         except Exception as e:
-            # This will now correctly show "single query returned 0 rows" if not found, which is not an error.
-            # We only print if it's a real database error.
             if "0 rows" not in str(e):
                  print(f"ERROR (HEADLESS) in get_daily_opening_balance: {e}")
             return None
 
-    # --- [REBUILT] Enforces 1-to-1 Check ---
-    def set_daily_opening_balance(self, portfolio_id: str, mt5_account_id: str, opening_balance: float):
-        """
-        [REBUILT] Sets or updates the opening balance for today using upsert,
-        strictly matching BOTH PortfolioID and mt5_account_id.
-        """
+    def set_daily_opening_balance(self, portfolio_id: str, mt5_account_id: str, opening_balance: float, broker_date_str: str):
         if not self.client: return False
-        today_utc_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        # [SYSTEM INTEGRITY FIX] Use the provided broker date string for saving
         try:
-            record = {
-                "PortfolioID": portfolio_id,
-                "Date": today_utc_str,
-                "OpeningBalance": opening_balance,
-                "mt5_account_id": str(mt5_account_id)
-            }
-            # The on_conflict parameter tells Supabase which columns define a "duplicate".
-            # This MUST match the Composite Primary Key of the table.
-            self.client.table("PortfolioDailyMetrics").upsert(
-                record, 
-                on_conflict='PortfolioID, Date'
-            ).execute()
+            record = { "PortfolioID": portfolio_id, "Date": broker_date_str, "OpeningBalance": opening_balance, "mt5_account_id": str(mt5_account_id) }
+            self.client.table("PortfolioDailyMetrics").upsert(record, on_conflict='PortfolioID, Date').execute()
+            print(f"SUCCESS (HEADLESS): Set opening balance for {broker_date_str} to {opening_balance}")
             return True
         except Exception as e:
             print(f"ERROR (HEADLESS) in set_daily_opening_balance: {e}")
             return False
+        
+    def get_broker_timezone(self, broker_name):
+        """ค้นหา timezone offset จากชื่อโบรกเกอร์"""
+        try:
+            response = self.client.table('BrokerSettings').select('timezone_offset').eq('broker_name', broker_name).single().execute()
+            return response.data.get('timezone_offset')
+        except Exception:
+            return None
+
+    def set_broker_timezone(self, broker_name, offset):
+        """บันทึก timezone offset สำหรับโบรกเกอร์ใหม่"""
+        try:
+            data_to_insert = {'broker_name': broker_name, 'timezone_offset': offset}
+            self.client.table('BrokerSettings').upsert(data_to_insert, on_conflict='broker_name').execute()
+            print(f"SUCCESS (HEADLESS): Set timezone for broker '{broker_name}' to {offset}")
+            return True
+        except Exception as e:
+            print(f"Error saving broker timezone setting: {e}")
+            return False
+        
+    def update_portfolio_settings(self, portfolio_id: str, settings_data: dict):
+        """
+        Updates specific settings for a given portfolio.
+        """
+        if not portfolio_id or not settings_data:
+            print("ERROR: Portfolio ID or settings data is missing for update.")
+            return False
+        try:
+            self.client.table('Portfolios').update(settings_data).eq('PortfolioID', portfolio_id).execute()
+            print(f"Successfully updated settings for portfolio {portfolio_id}.")
+            return True
+        except Exception as e:
+            print(f"EXCEPTION during portfolio settings update for {portfolio_id}: {e}")
+            return False    

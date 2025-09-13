@@ -1,6 +1,7 @@
 # core/mt5_handler.py (The Definitive Version)
 import MetaTrader5 as mt5
 import pandas as pd
+import time
 from datetime import datetime, time as dt_time, timedelta
 import numpy as np
 import pytz
@@ -12,62 +13,32 @@ class MT5Handler:
     def __init__(self):
         self._is_connected = False
         self.account_id = None
-        # NOTE: ตั้งค่า Timezone ของ Broker ให้ถูกต้อง (ส่วนใหญ่เป็น GMT+3)
-        self.BROKER_TZ = pytz.timezone(settings.BROKER_TIMEZONE) 
-
+        
     def initialize_connection(self):
-        if self._is_connected: return True
+        if self._is_connected: 
+            return True
         try:
-            if not mt5.initialize(): return False
+            if not mt5.initialize():
+                print(f"initialize() failed, error code = {mt5.last_error()}")
+                return False
+            
             account_info = mt5.account_info()
-            if not account_info: mt5.shutdown(); return False
+            if not account_info:
+                print(f"account_info() failed, error code = {mt5.last_error()}")
+                mt5.shutdown()
+                return False
+                
             self.account_id, self._is_connected = account_info.login, True
             print(f"Successfully connected to MT5 account {self.account_id}.")
             return True
-        except Exception as e: return False
+
+        except Exception as e:
+            print(f"An exception occurred during MT5 initialization: {e}")
+            return False
 
     def shutdown_connection(self):
         if self._is_connected: mt5.shutdown(); self._is_connected = False
 
-    def _get_start_of_trading_day_utc(self):
-        """
-        Gets the precise start of the trading day based on the MT5 server's time, 
-        not the local machine's time. This is crucial for accurate history fetching.
-        """
-        if not self._is_connected:
-            return datetime.now(pytz.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-
-        try:
-            # 1. Get the current time directly from the MT5 server using a reliable symbol
-            tick = mt5.symbol_info_tick("EURUSD")
-            if not tick:
-                raise Exception("Could not get tick for EURUSD to determine server time.")
-            server_time_unix = tick.time
-            
-            # 2. Get the timezone string from the server
-            server_timezone_str = mt5.terminal_info().timezone
-            
-            # 3. Create a timezone object
-            server_tz = pytz.timezone(server_timezone_str)
-            
-            # 4. Convert the server's unix timestamp to a timezone-aware datetime object
-            server_datetime_aware = datetime.fromtimestamp(server_time_unix, tz=server_tz)
-            
-            # 5. Set the time to the beginning of that server's day (00:00:00)
-            start_of_day_server_tz = server_datetime_aware.replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            # 6. Convert it back to UTC for consistent use
-            start_of_day_utc = start_of_day_server_tz.astimezone(pytz.utc)
-            
-            print(f"✅ MT5 Server Timezone: {server_timezone_str}")
-            print(f"✅ Calculated Start of Day (UTC): {start_of_day_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-
-            return start_of_day_utc
-
-        except Exception as e:
-            print(f"❌ ERROR: Could not get server time. Falling back to local time. Error: {e}")
-            return datetime.now(pytz.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    
     def get_account_info(self): return mt5.account_info()._asdict() if self._is_connected and mt5.account_info() else None
 
     def get_all_symbol_properties(self):
@@ -100,19 +71,49 @@ class MT5Handler:
                 return {"error": "Order Send Failed", "last_error": mt5.last_error()}
         except Exception as e: return {"error": str(e)}
 
+    # [ THE DEFINITIVE, ADAPTED FUNCTION ]
     def get_open_positions(self):
-        if not self._is_connected: return pd.DataFrame()
+        if not self._is_connected:
+            return pd.DataFrame()
+        
         positions = mt5.positions_get()
-        if not positions: return pd.DataFrame()
+        if not positions:
+            return pd.DataFrame()
+            
         df = pd.DataFrame(list(positions), columns=positions[0]._asdict().keys())
-        df['Time'] = pd.to_datetime(df['time'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%H:%M:%S')
-        df['position_risk'] = df.apply(lambda p: abs(mt5.order_calc_profit(mt5.ORDER_TYPE_SELL if p['type'] == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY, p['symbol'], p['volume'], p['price_open'], p['sl'])) if p['sl'] > 0 else 0.0, axis=1)
+        df['Time'] = pd.to_datetime(df['time'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%Y.%m.%d %H:%M:%S')        
+
+        # [ THE FIX ] --- This new logic no longer references 'commission' ---
+        def calculate_risk_without_commission(position):
+            # A position is considered at "Break-Even" if the SL is at or better than the entry price.
+            # While not perfect (doesn't account for costs), it's the safest assumption with available data.
+            is_break_even = (
+                (position['type'] == mt5.ORDER_TYPE_BUY and position['sl'] >= position['price_open']) or
+                (position['type'] == mt5.ORDER_TYPE_SELL and position['sl'] > 0 and position['sl'] <= position['price_open'])
+            )
+            
+            if position['sl'] > 0 and not is_break_even:
+                return abs(mt5.order_calc_profit(
+                    mt5.ORDER_TYPE_SELL if position['type'] == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+                    position['symbol'],
+                    position['volume'],
+                    position['price_open'],
+                    position['sl']
+                ) or 0.0)
+            else:
+                # If no SL or at BE, committed risk is zero
+                return 0.0
+
+        df['position_risk'] = df.apply(calculate_risk_without_commission, axis=1)
+        # --- [ END OF FIX ] ---
+
         df['position_reward'] = df.apply(lambda p: mt5.order_calc_profit(p['type'], p['symbol'], p['volume'], p['price_open'], p['tp']) if p['tp'] > 0 else 0.0, axis=1)
         df['position_rr'] = df.apply(lambda r: r['position_reward'] / r['position_risk'] if r['position_risk'] > 0 else 0, axis=1)
         df['Type'] = df['type'].apply(lambda x: 'Buy' if x == mt5.ORDER_TYPE_BUY else 'Sell')
         df.rename(columns={'symbol': 'Symbol', 'volume': 'Volume', 'profit': 'Profit', 'price_open': 'Price', 'sl': 'SL', 'tp': 'TP', 'ticket': 'Ticket'}, inplace=True)
+        
         return df[['Ticket', 'Time', 'Symbol', 'Type', 'Volume', 'Price', 'SL', 'TP', 'Profit', 'position_risk', 'position_rr']]
-    
+
     def get_pending_orders(self):
         if not self._is_connected: return pd.DataFrame()
         orders = mt5.orders_get()
@@ -123,58 +124,62 @@ class MT5Handler:
         df['Type'] = df['type'].map(order_type_map)
         df = df[df['Type'].notna()]
         if df.empty: return pd.DataFrame()
-        df['Time'] = pd.to_datetime(df['time_setup'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%H:%M:%S')
-        df.rename(columns={'ticket': 'Ticket', 'symbol': 'Symbol', 'volume_current': 'Lots', 'price_open': 'Entry Price', 'sl': 'SL', 'tp': 'TP'}, inplace=True)
-        return df[['Ticket', 'Time', 'Symbol', 'Type', 'Lots', 'Entry Price', 'SL', 'TP']]
+        df['Time'] = pd.to_datetime(df['time_setup'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%Y.%m.%d %H:%M:%S')
+        df['position_risk'] = df.apply(lambda o: abs(mt5.order_calc_profit(mt5.ORDER_TYPE_SELL if o['type'] in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP] else mt5.ORDER_TYPE_BUY, o['symbol'], o['volume_initial'], o['price_open'], o['sl'])) if o['sl'] > 0 else 0.0, axis=1)
+        df.rename(columns={'ticket': 'Ticket', 'symbol': 'Symbol', 'volume_initial': 'Volume', 'price_open': 'Price', 'sl': 'SL', 'tp': 'TP'}, inplace=True)
+        return df[['Ticket', 'Time', 'Symbol', 'Type', 'Volume', 'Price', 'SL', 'TP', 'position_risk']]
 
-    # [DEFINITIVE FIX #4] The final, most accurate trade history logic
-
-    def get_trade_history(self, start_date, end_date):
+    def get_trade_history(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
         if not self._is_connected:
             return pd.DataFrame()
+
+        history_start = start_date - timedelta(days=30) 
+        all_deals = mt5.history_deals_get(history_start, end_date)
         
-        deals = mt5.history_deals_get(start_date, end_date)
-        if deals is None or len(deals) == 0:
-            return pd.DataFrame()
-        
-        columns = deals[0]._asdict().keys()
-        deals_df = pd.DataFrame(list(deals), columns=columns)
-        
-        # --- [THE EXORCISM FIX V2] ---
-        # A REAL trade involves at least TWO deals: one IN and one OUT.
-        # We find all position_ids that have both IN and OUT deals.
-        
-        deals_in = deals_df[deals_df['entry'] == mt5.DEAL_ENTRY_IN]['position_id'].unique()
-        deals_out = deals_df[deals_df['entry'] == mt5.DEAL_ENTRY_OUT]['position_id'].unique()
-        
-        # The real, closed position_ids are the ones present in BOTH lists.
-        real_position_ids = np.intersect1d(deals_in, deals_out)
-        
-        if len(real_position_ids) == 0:
+        if all_deals is None or len(all_deals) == 0:
             return pd.DataFrame()
 
-        # Filter the original deals_df to keep only the deals from real positions
-        trade_deals = deals_df[deals_df['position_id'].isin(real_position_ids)].copy()
-        
-        # Now we can safely group them
-        summary = trade_deals.groupby('position_id').agg(
+        deals_df = pd.DataFrame(list(all_deals), columns=all_deals[0]._asdict().keys())
+        deals_df['time_dt'] = pd.to_datetime(deals_df['time'], unit='s', utc=True)
+
+        closing_deals_today = deals_df[
+            (deals_df['time_dt'] >= start_date) &
+            (deals_df['time_dt'] <= end_date) &
+            (deals_df['entry'].isin([mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT]))
+        ]
+
+        closed_position_ids = closing_deals_today['position_id'].unique()
+
+        if len(closed_position_ids) == 0:
+            return pd.DataFrame()
+
+        relevant_deals = deals_df[deals_df['position_id'].isin(closed_position_ids)].copy()
+
+        opening_deals = relevant_deals[relevant_deals['entry'] == mt5.DEAL_ENTRY_IN].copy()
+        opening_deals = opening_deals.loc[opening_deals.groupby('position_id')['time'].idxmin()]
+
+        summary_agg = relevant_deals.groupby('position_id').agg(
             Symbol=('symbol', 'first'),
             Volume=('volume', 'first'),
             Close_Time_Raw=('time', 'last'),
-            Net_Profit=('profit', 'sum'),
+            Gross_Profit=('profit', 'sum'),
             Commission=('commission', 'sum'),
-            Swap=('swap', 'sum'),
-            Position_Type=('type', 'first')
+            Swap=('swap', 'sum')
         ).reset_index()
 
-        summary['Profit'] = summary['Net_Profit'] + summary['Commission'] + summary['Swap']
-        summary['Type'] = summary['Position_Type'].map({0: 'Buy', 1: 'Sell'})
+        summary = pd.merge(summary_agg, opening_deals[['position_id', 'type']], on='position_id', how='left')
+
+        summary['Net P/L'] = summary['Gross_Profit'] + summary['Commission'] + summary['Swap']
+        summary['Type'] = summary['type'].map({mt5.ORDER_TYPE_BUY: 'Buy', mt5.ORDER_TYPE_SELL: 'Sell'})
         summary['Close Time'] = pd.to_datetime(summary['Close_Time_Raw'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%Y.%m.%d %H:%M:%S')
+        # [CORRECTION] Costs should reflect all non-profit deductions
+        summary['Costs'] = summary['Commission'] + summary['Swap']
+        summary.rename(columns={'Gross_Profit': 'Gross P/L'}, inplace=True)
         
-        final_df = summary[['Close Time', 'Symbol', 'Type', 'Volume', 'Profit']].sort_values(by='Close Time', ascending=True)
-        
+        final_df = summary[['Close Time', 'Symbol', 'Type', 'Volume', 'Gross P/L', 'Costs', 'Net P/L']].sort_values(by='Close Time', ascending=True)
+
         return final_df
- 
+        
     def execute_trade(self, trade_details):
         try:
             symbol, order_type_str, lot_size, sl, tp, entry = trade_details.get('symbol'), trade_details.get('type'), float(trade_details.get('lot_size')), float(trade_details.get('sl', 0)), float(trade_details.get('tp', 0)), float(trade_details.get('entry_price', 0))
@@ -232,3 +237,28 @@ class MT5Handler:
                 results["rr_ratio"] = actual_profit / actual_loss
         
         return results
+
+    def get_broker_now(self, broker_timezone_offset: int):
+        """
+        [SYSTEM INTEGRITY FIX] New helper function to get the current time in the broker's timezone.
+        """
+        try:
+            broker_tz = pytz.timezone(f'Etc/GMT{-broker_timezone_offset}')
+            return datetime.now(pytz.utc).astimezone(broker_tz)
+        except Exception:
+            # Fallback to UTC if offset is invalid
+            return datetime.now(pytz.utc)
+
+    def get_session_start_time_utc(self, broker_timezone_offset: int):
+        """
+        Calculates the start of the trading day (00:00) in UTC, based on the broker's timezone offset.
+        """
+        try:
+            now_broker_time = self.get_broker_now(broker_timezone_offset)
+            start_of_day_broker = now_broker_time.replace(hour=0, minute=0, second=0, microsecond=0)
+            start_of_day_utc = start_of_day_broker.astimezone(pytz.utc)
+            print(f"Calculated Session Start Time (UTC) using offset {broker_timezone_offset}: {start_of_day_utc}")
+            return start_of_day_utc
+        except Exception as e:
+            print(f"ERROR calculating session start time: {e}. Falling back to current UTC day.")
+            return datetime.now(pytz.utc).replace(hour=0, minute=0, second=0, microsecond=0)

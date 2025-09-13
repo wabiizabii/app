@@ -13,7 +13,7 @@
 <body>
     <div class="cockpit-wrapper">        
         <!-- ====================================================== -->
-        <!-- PART 1: IGNITION MODULE                              -->
+        <!-- PART 1: IGNITION MODULE (Login/Startup Screens)        -->
         <!-- ====================================================== -->
         <div class="ignition-module" id="ignition-module">
             <!-- Balance Confirmation Module -->
@@ -37,53 +37,34 @@
         </div>
 
         <!-- ====================================================== -->
-        <!-- PART 2: MAIN COCKPIT                                 -->
+        <!-- PART 2: MAIN COCKPIT (The Dashboard itself)            -->
         <!-- ====================================================== -->
         <main class="cockpit-container" id="cockpit-container">
             <div class="main-view" id="main-view">
-                
-                <!-- [ RE-ARCHITECTED ] Unified Left Column -->
                 <div id="left-col">
-                    <div class="card" id="left-panel-card">
-                        <!-- Consistency Gauge (Top Position) -->
-                        <div id="consistency-gauge-wrapper">
-                            <h4 class="gauge-header">
-                                <span>PROFIT CONSISTENCY</span>
-                                <span class="info-icon" title="Measures how much of your total profit comes from your single biggest winning trade. A lower % is better for Prop Firm consistency rules.">ⓘ</span>
-                            </h4>
-                            <div class="consistency-bar-wrapper">
-                                <div id="consistency-tooltip" class="consistency-tooltip">0%</div>
-                                <div id="consistency-bar-background" class="consistency-bar"></div>
-                            </div>
-                            <div class="consistency-labels-wrapper">
-                                <span>0%</span>
-                                <span id="consistency-safe-zone-label" class="gauge-label-middle">30%</span>
-                                <span>100%</span>
-                            </div>
-                        </div>
-                        <!-- HUD (Middle Position) -->
-                        <div id="hud-bar"></div>
-                        <!-- Chart Area (Bottom, Flexible Position) -->
-                        <div id="chart-area"><div id="tradingview-widget-container"></div></div>
-                    </div>
+                    <div id="hud-bar"></div>
+                    <div id="chart-area" class="card"><div id="tradingview-widget-container"></div></div>
                 </div>
 
                 <div class="v-splitter" id="splitter1"></div>
+                
                 <div id="battle-planner-col"></div>
+
                 <div class="v-splitter" id="splitter2"></div>
+
                 <div id="analysis-col"></div>
             </div>
 
             <div class="h-splitter" id="h-splitter"></div>
+            
             <div id="bottom-bar"></div>
         </main>
 
         <!-- ====================================================== -->
-        <!-- PART 3: FLYOUT TABS [ Corrected Position ]           -->
+        <!-- PART 3: FLYOUT TABS                                    -->
         <!-- ====================================================== -->
         <div id="bp-flyout-tab" class="flyout-tab">Planner</div>
         <div id="an-flyout-tab" class="flyout-tab">Analysis</div>
-        <div id="sb-flyout-tab" class="flyout-tab-bottom">Situational Awareness</div>
 
     </div>
     
@@ -100,7 +81,7 @@
     <template id="hud-bar-template">
         <div class="card hud-card" id="live-equity-card">
             <h4 class="card-header">
-                <span>LIVE EQUITY</span>
+                <span>LIVE EQUITY</span>  <!-- ครอบข้อความด้วย span -->
                 <div id="notification-area">
                     <div id="notification-bell">🔔</div>
                     <span id="notification-badge" class="hidden">0</span>
@@ -196,83 +177,7 @@
         </div>
     </template>
     <template id="analysis-template">
-        <div id="athena-expander" class="card expander-panel">
-            <div class="card-header"><h3>ATHENA'S CORNER</h3></div>
-            <div class="side-panel-content">
-                
-                <!-- Tab Controls -->
-                <div class="athena-tabs">
-                    <button class="athena-tab-btn active" data-target="mission-planner-pane">Mission Planner</button>
-                    <button class="athena-tab-btn" data-target="analysis-pane">Analysis</button>
-                </div>
-
-                <!-- Content Panes -->
-                <div class="athena-content">
-                    
-                    <!-- Mission Planner Pane -->
-                    <div id="mission-planner-pane" class="athena-content-pane active">
-                        <div class="planner-group">
-                            <label>Evaluation Balance ($)</label>
-                            <input type="number" id="mp-balance" class="planner-input" value="25000">
-                        </div>
-                        <div class="planner-group">
-                            <label>Profit Target (%)</label>
-                            <input type="number" id="mp-profit-target" class="planner-input" value="8">
-                        </div>
-                        <div class="planner-group">
-                            <label>Consistency Rule (%)</label>
-                            <input type="number" id="mp-consistency-rule" class="planner-input" value="30">
-                        </div>
-                        <div class="planner-group">
-                            <label>Assumed R:R Ratio</label>
-                            <select id="mp-rr-ratio" class="planner-select">
-                                <option value="1.5">1 : 1.5</option>
-                                <option value="2" selected>1 : 2</option>
-                                <option value="3">1 : 3</option>
-                            </select>
-                        </div>
-                        <div style="display: flex; gap: 12px;">
-                            <div class="planner-group">
-                                <label>Current Wins</label>
-                                <input type="number" id="mp-wins" class="planner-input" value="0">
-                            </div>
-                            <div class="planner-group">
-                                <label>Current Losses</label>
-                                <input type="number" id="mp-losses" class="planner-input" value="0">
-                            </div>
-                        </div>
-                        <button class="btn-planner" id="mp-calculate-btn" style="margin-top: 16px;">Calculate Mission Plan</button>
-                        
-                        <!-- Results Area (Hidden by default) -->
-                        <div id="mp-results" class="mission-results" style="display: none;">
-                            <div class="result-item">
-                                <span class="result-label">Optimal Risk / Trade:</span>
-                                <span class="result-value text-loss" id="result-risk-usd">$0.00</span>
-                            </div>
-                            <div class="result-item">
-                                <span class="result-label">Optimal Profit / Trade:</span>
-                                <span class="result-value text-profit" id="result-profit-usd">$0.00</span>
-                            </div>
-                            <hr style="border-color: var(--color-border); margin: 8px 0;">
-                            <div class="result-item">
-                                <span class="result-label">Progress to Target:</span>
-                                <span class="result-value" id="result-progress">0%</span>
-                            </div>
-                            <div class="result-item">
-                                <span class="result-label">Wins Needed to Pass:</span>
-                                <span class="result-value" id="result-wins-needed">0</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Analysis Pane (Placeholder) -->
-                    <div id="analysis-pane" class="athena-content-pane">
-                        <p>Multi-Timeframe Analysis content goes here...</p>
-                    </div>
-
-                </div>
-            </div>
-        </div>
+        <div id="analysis-expander" class="card expander-panel"><div class="card-header"><h3>MULTI-TIMEFRAME ANALYSIS</h3></div><div class="side-panel-content"><p>Analysis content goes here...</p></div></div>
     </template>
     <template id="bottom-bar-template">
         <div id="bottom-bar-header-tabs">
