@@ -19,6 +19,7 @@ CONNECTED_CLIENTS = set()
 SESSION_STATE = { "status": "INITIALIZING" }
 SHUTDOWN_EVENT = asyncio.Event()
 
+
 def json_converter(o):
     if isinstance(o, (datetime, pd.Timestamp)): return o.isoformat()
     if isinstance(o, (np.integer, np.int64)): return int(o)

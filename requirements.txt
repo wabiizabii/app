@@ -1,0 +1,7 @@
+pandas
+numpy
+pytz
+websockets
+supabase
+beautifulsoup4
+Pillow

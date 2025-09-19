@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="portfolio_command_center.css">
 </head>
 <body>
     <div class="cockpit-wrapper">        
@@ -17,14 +18,14 @@
         <!-- ====================================================== -->
         <div class="ignition-module" id="ignition-module">
             <!-- Balance Confirmation Module -->
-            <div id="ignition-module-balance" style="display: none; flex-direction: column; align-items: center;">
+            <div id="ignition-content-balance" style="display: none; flex-direction: column; align-items: center;">
                 <h2 class="header">PRE-FLIGHT CHECK</h2>
                 <input type="number" id="openingBalanceInput" placeholder="Enter Opening Balance" step="0.01">
                 <button id="startTradingBtn">START TRADING DAY</button>
             </div>
 
             <!-- Timezone Confirmation Module (Corrected Version) -->
-            <div id="ignition-module-timezone" style="display: none; flex-direction: column; align-items: center;">
+            <div id="ignition-content-timezone" style="display: none; flex-direction: column; align-items: center;">
                 <h2 class="header">NEW BROKER DETECTED</h2>
                 <p id="broker-confirmation-text" style="margin-bottom: 16px; color: var(--color-text-secondary);">
                     Please confirm the timezone for...
@@ -81,12 +82,14 @@
         <!-- ====================================================== -->
         <!-- PART 3: FLYOUT TABS [ Corrected Position ]           -->
         <!-- ====================================================== -->
+        
+
+    </div>
+    
         <div id="bp-flyout-tab" class="flyout-tab">Planner</div>
         <div id="an-flyout-tab" class="flyout-tab">Analysis</div>
         <div id="sb-flyout-tab" class="flyout-tab-bottom">Situational Awareness</div>
 
-    </div>
-    
     <!-- ====================================================== -->
     <!-- SCRIPTS and TEMPLATES                                -->
     <!-- ====================================================== -->
@@ -95,7 +98,9 @@
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     
     <script src="main.js"></script>
-    
+    <script src="portfolio_command_center.js"></script>
+    <script src="athena_prime_module.js"></script>
+
     <!-- UI Templates -->
     <template id="hud-bar-template">
         <div class="card hud-card" id="live-equity-card">
@@ -211,56 +216,59 @@
                     
                     <!-- Mission Planner Pane -->
                     <div id="mission-planner-pane" class="athena-content-pane active">
-                        <div class="planner-group">
-                            <label>Evaluation Balance ($)</label>
-                            <input type="number" id="mp-balance" class="planner-input" value="25000">
-                        </div>
-                        <div class="planner-group">
-                            <label>Profit Target (%)</label>
-                            <input type="number" id="mp-profit-target" class="planner-input" value="8">
-                        </div>
-                        <div class="planner-group">
-                            <label>Consistency Rule (%)</label>
-                            <input type="number" id="mp-consistency-rule" class="planner-input" value="30">
-                        </div>
-                        <div class="planner-group">
-                            <label>Assumed R:R Ratio</label>
-                            <select id="mp-rr-ratio" class="planner-select">
-                                <option value="1.5">1 : 1.5</option>
-                                <option value="2" selected>1 : 2</option>
-                                <option value="3">1 : 3</option>
-                            </select>
-                        </div>
-                        <div style="display: flex; gap: 12px;">
+                        <!-- THE ONLY CHANGE IS HERE: ADDING THE ID TO THIS WRAPPER DIV -->
+                        <div id="foundation-form-wrapper">
                             <div class="planner-group">
-                                <label>Current Wins</label>
-                                <input type="number" id="mp-wins" class="planner-input" value="0">
+                                <label>Evaluation Balance ($)</label>
+                                <input type="number" id="mp-balance" class="planner-input" value="25000">
                             </div>
                             <div class="planner-group">
-                                <label>Current Losses</label>
-                                <input type="number" id="mp-losses" class="planner-input" value="0">
+                                <label>Profit Target (%)</label>
+                                <input type="number" id="mp-profit-target" class="planner-input" value="8">
                             </div>
-                        </div>
-                        <button class="btn-planner" id="mp-calculate-btn" style="margin-top: 16px;">Calculate Mission Plan</button>
-                        
-                        <!-- Results Area (Hidden by default) -->
-                        <div id="mp-results" class="mission-results" style="display: none;">
-                            <div class="result-item">
-                                <span class="result-label">Optimal Risk / Trade:</span>
-                                <span class="result-value text-loss" id="result-risk-usd">$0.00</span>
+                            <div class="planner-group">
+                                <label>Consistency Rule (%)</label>
+                                <input type="number" id="mp-consistency-rule" class="planner-input" value="30">
                             </div>
-                            <div class="result-item">
-                                <span class="result-label">Optimal Profit / Trade:</span>
-                                <span class="result-value text-profit" id="result-profit-usd">$0.00</span>
+                            <div class="planner-group">
+                                <label>Assumed R:R Ratio</label>
+                                <select id="mp-rr-ratio" class="planner-select">
+                                    <option value="1.5">1 : 1.5</option>
+                                    <option value="2" selected>1 : 2</option>
+                                    <option value="3">1 : 3</option>
+                                </select>
                             </div>
-                            <hr style="border-color: var(--color-border); margin: 8px 0;">
-                            <div class="result-item">
-                                <span class="result-label">Progress to Target:</span>
-                                <span class="result-value" id="result-progress">0%</span>
+                            <div style="display: flex; gap: 12px;">
+                                <div class="planner-group">
+                                    <label>Current Wins</label>
+                                    <input type="number" id="mp-wins" class="planner-input" value="0">
+                                </div>
+                                <div class="planner-group">
+                                    <label>Current Losses</label>
+                                    <input type="number" id="mp-losses" class="planner-input" value="0">
+                                </div>
                             </div>
-                            <div class="result-item">
-                                <span class="result-label">Wins Needed to Pass:</span>
-                                <span class="result-value" id="result-wins-needed">0</span>
+                            <button class="btn-planner" id="mp-calculate-btn" style="margin-top: 16px;">Calculate Mission Plan</button>
+                            
+                            <!-- Results Area (Hidden by default) -->
+                            <div id="mp-results" class="mission-results" style="display: none;">
+                                <div class="result-item">
+                                    <span class="result-label">Optimal Risk / Trade:</span>
+                                    <span class="result-value text-loss" id="result-risk-usd">$0.00</span>
+                                </div>
+                                <div class="result-item">
+                                    <span class="result-label">Optimal Profit / Trade:</span>
+                                    <span class="result-value text-profit" id="result-profit-usd">$0.00</span>
+                                </div>
+                                <hr style="border-color: var(--color-border); margin: 8px 0;">
+                                <div class="result-item">
+                                    <span class="result-label">Progress to Target:</span>
+                                    <span class="result-value" id="result-progress">0%</span>
+                                </div>
+                                <div class="result-item">
+                                    <span class="result-label">Wins Needed to Pass:</span>
+                                    <span class="result-value" id="result-wins-needed">0</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -276,8 +284,14 @@
     </template>
     <template id="bottom-bar-template">
         <div id="bottom-bar-header-tabs">
+            <!-- Group 1: Situational Awareness (ปุ่มเดิมของท่าน ถูกรักษาไว้อย่างสมบูรณ์) -->
             <button class="bottom-header-btn" data-target="active-orders-section">ACTIVE ORDERS</button>
             <button class="bottom-header-btn" data-target="trade-history-section">TRADE HISTORY</button>
+            
+            <!-- [NEW] Group 2: Command Center Trigger (ปุ่มใหม่ที่เพิ่มเข้ามา) -->
+            <button id="launch-portfolio-command-btn" class="bottom-header-btn" style="margin-left: 20px;">
+                💼 PORTFOLIO COMMAND
+            </button>
         </div>
         <div id="situational-awareness-card">
             <div id="active-orders-section" class="expander-section">
@@ -333,5 +347,44 @@
             </div>
         </div>
     </template>
+    
+    <!-- ====================================================== -->
+    <!-- [NEW MODULE] Portfolio Command Center Template       -->
+    <!-- ====================================================== -->
+    <template id="portfolio-command-center-template">
+        <div id="pcc-modal-overlay" class="modal-overlay hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>💼 Portfolio Command Center</h3>
+                    <button id="pcc-close-btn" class="modal-close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <!-- Tab Controls -->
+                    <div class="pcc-tabs">
+                        <button class="pcc-tab-btn active" data-target="pcc-manage-pane">Manage Portfolios</button>
+                        <button class="pcc-tab-btn" data-target="pcc-upload-pane">Upload Statement</button>
+                    </div>
+
+                    <!-- Content Panes -->
+                    <div class="pcc-content">
+                        <!-- Pane 1: Manage Portfolios -->
+                        <div id="pcc-manage-pane" class="pcc-content-pane active">
+                            <h4>Manage Your Fleet</h4>
+                            <!-- Content for 'Manage Portfolios' tab goes here -->
+                            <p>Portfolio list and edit forms will be rendered here.</p>
+                        </div>
+
+                        <!-- Pane 2: Upload Statement -->
+                        <div id="pcc-upload-pane" class="pcc-content-pane">
+                            <h4>Data Ingestion Dock</h4>
+                            <!-- Content for 'Upload Statement' tab goes here -->
+                            <p>Statement uploader will be rendered here.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
 </body>
 </html>

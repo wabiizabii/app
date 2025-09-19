@@ -1,0 +1,183 @@
+// ==============================================================================
+// FILE: athena_prime_module.js
+// OPERATION: PHOENIX (FINAL VERSION w/ CORRECTION PROTOCOL)
+// ==============================================================================
+
+(function() {
+    'use strict';
+
+    window.PhoenixModule = {
+        _selectors: {},
+        _isInitialized: false,
+        _correctionUIDone: false, // Flag to ensure we only build the UI once
+
+        init: function() {
+            this._selectors = {
+                // Main Panel Selectors
+                athenaCard: document.getElementById('athena-expander'),
+                athenaHeader: document.querySelector('#athena-expander .card-header h3'),
+                missionPlannerPane: document.getElementById('mission-planner-pane'),
+                
+                // [NEW] Selectors for the ORIGINAL Foundation Protocol form
+                foundationForm: {
+                    container: document.getElementById('mission-planner-pane').querySelector('.planner-group')?.parentElement,
+                    calculateBtn: document.getElementById('mp-calculate-btn'),
+                    results: document.getElementById('mp-results')
+                },
+
+                // [NEW] Selectors for the NEW Correction Protocol readouts
+                correctionBay: {
+                    // These will be populated after we build the UI
+                }
+            };
+            
+            if (this._selectors.athenaHeader) {
+                this._isInitialized = true;
+                console.log("✅ PHOENIX MODULE: Synchronized and Initialized. Ready for operations.");
+            } else {
+                console.error("PHOENIX FATAL: Initialization failed. Could not find critical UI elements.");
+            }
+        },
+
+        receiveData: function(serverData) {
+            if (!this._isInitialized) return;
+            this.analyzeAndDecide(serverData);
+        },
+
+        analyzeAndDecide: function(data) {
+            // FOR TESTING: Manually set this to true to see the Correction UI
+            // const isCorrectionNeeded = true; 
+            const isCorrectionNeeded = true; 
+
+            if (isCorrectionNeeded) {
+                this.runCorrectionProtocol(data);
+            } else {
+                this.runFoundationProtocol(data);
+            }
+        },
+
+        // --- PROTOCOL 1: CORRECTION ---
+        runCorrectionProtocol: function(data) {
+            const metrics = this._calculateCorrectionMetrics(data);
+            const uiUpdatePayload = {
+                mode: 'Correction',
+                title: 'MISSION: FIX CONSISTENCY',
+                metrics: metrics
+            };
+            this.updateUserInterface(uiUpdatePayload);
+        },
+
+        _calculateCorrectionMetrics: function(data) {
+            const totalProfit = data.history_total_profit || 0;
+            const consistencyPercent = data.profit_consistency_percent || 0;
+
+            // We must derive the Highest Profit Day value from the data we have
+            // HighestProfit = (TotalProfit * consistencyPercent) / 100 -- THIS IS WRONG
+            // The backend calculates percent = (LargestWin / TotalWinProfit) * 100
+            // We need to find the REAL highest profit day from history.
+            // For now, let's assume a placeholder logic until backend is updated.
+            // Let's find the highest single day profit from the history_df
+            let dailyProfits = {};
+            if (data.trade_history && data.trade_history.length > 0) {
+                data.trade_history.forEach(trade => {
+                    const date = trade['Close Time'].split(' ')[0];
+                    if (!dailyProfits[date]) dailyProfits[date] = 0;
+                    dailyProfits[date] += trade['Net P/L'];
+                });
+            }
+            const highestProfitDay = Object.values(dailyProfits).reduce((max, profit) => Math.max(max, profit), 0);
+
+            const requiredTotalProfit = (highestProfitDay / 20) * 100;
+            const profitNeeded = Math.max(0, requiredTotalProfit - totalProfit);
+            const maxSafeProfit = highestProfitDay * 0.9;
+
+            return { highestProfitDay, totalProfit, requiredTotalProfit, profitNeeded, maxSafeProfit };
+        },
+
+        // --- PROTOCOL 2: FOUNDATION ---
+        runFoundationProtocol: function(data) {
+            const uiUpdatePayload = {
+                mode: 'Foundation',
+                title: 'MISSION: BUILD & ADVANCE'
+            };
+            this.updateUserInterface(uiUpdatePayload);
+        },
+        
+        // --- UI CONTROLLER ---
+        updateUserInterface: function(payload) {
+            if (this._selectors.athenaHeader) {
+                this._selectors.athenaHeader.textContent = payload.title;
+                this._selectors.athenaHeader.style.color = (payload.mode === 'Correction') ? 'var(--color-warning)' : 'var(--color-text-primary)';
+            }
+
+            if (payload.mode === 'Correction') {
+                // Show Correction UI, Hide Foundation UI
+                if (this._selectors.foundationForm.container) this._selectors.foundationForm.container.style.display = 'none';
+                if (this._selectors.foundationForm.calculateBtn) this._selectors.foundationForm.calculateBtn.style.display = 'none';
+                if (this._selectors.foundationForm.results) this._selectors.foundationForm.results.style.display = 'none';
+
+                if (!this._correctionUIDone) {
+                    this._buildCorrectionUI();
+                    // After building, grab the selectors for the new elements
+                    this._selectors.correctionBay = {
+                        container: document.getElementById('phoenix-correction-bay'),
+                        highestProfit: document.getElementById('pcc-highest-profit'),
+                        currentProfit: document.getElementById('pcc-current-profit'),
+                        profitNeeded: document.getElementById('pcc-profit-needed'),
+                        safeProfit: document.getElementById('pcc-safe-profit')
+                    };
+                    this._correctionUIDone = true;
+                }
+                
+                if (this._selectors.correctionBay.container) this._selectors.correctionBay.container.style.display = 'flex';
+                
+                // Populate the Correction UI with calculated data
+                const format = (val) => `$${val.toFixed(2)}`;
+                if (this._selectors.correctionBay.highestProfit) this._selectors.correctionBay.highestProfit.textContent = format(payload.metrics.highestProfitDay);
+                if (this._selectors.correctionBay.currentProfit) this._selectors.correctionBay.currentProfit.textContent = format(payload.metrics.totalProfit);
+                if (this._selectors.correctionBay.profitNeeded) this._selectors.correctionBay.profitNeeded.textContent = format(payload.metrics.profitNeeded);
+                if (this._selectors.correctionBay.safeProfit) this._selectors.correctionBay.safeProfit.textContent = format(payload.metrics.maxSafeProfit);
+
+            } else { // Foundation Mode
+                // Show Foundation UI, Hide Correction UI
+                if (this._selectors.foundationForm.container) this._selectors.foundationForm.container.style.display = 'block';
+                if (this._selectors.foundationForm.calculateBtn) this._selectors.foundationForm.calculateBtn.style.display = 'block';
+                if (this._selectors.foundationForm.results) this._selectors.foundationForm.results.style.display = 'none'; // Keep results hidden initially
+                if (this._correctionUIDone && this._selectors.correctionBay.container) {
+                    this._selectors.correctionBay.container.style.display = 'none';
+                }
+            }
+        },
+
+        _buildCorrectionUI: function() {
+            const container = this._selectors.missionPlannerPane;
+            if (!container) return;
+            const correctionUI_HTML = `
+                <div id="phoenix-correction-bay" class="mission-results" style="display: flex; flex-direction: column; gap: 12px; margin-top: 0; padding-top: 0; border-top: none;">
+                    <div class="result-item">
+                        <span class="result-label">Highest Profit Day:</span>
+                        <span class="result-value" id="pcc-highest-profit">$0.00</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">Current Total Profit:</span>
+                        <span class="result-value" id="pcc-current-profit">$0.00</span>
+                    </div>
+                    <hr style="border-color: var(--color-border); margin: 4px 0;">
+                    <div class="result-item" style="padding: 4px; background-color: rgba(226, 179, 19, 0.1); border-radius: 4px;">
+                        <span class="result-label" style="font-weight: 700;">Profit Still Needed:</span>
+                        <span class="result-value text-warning" id="pcc-profit-needed" style="font-size: 1.1rem;">$0.00</span>
+                    </div>
+                    <div class="result-item" style="margin-top: 8px;">
+                        <span class="result-label text-loss">Max Safe Daily Profit:</span>
+                        <span class="result-value text-loss" id="pcc-safe-profit">$0.00</span>
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--color-text-secondary); margin-top: 12px; text-align: center;">
+                        Focus on small, consistent wins. Do not exceed the 'Max Safe' profit in a single day to avoid resetting your progress.
+                    </p>
+                </div>
+            `;
+            container.innerHTML = correctionUI_HTML;
+        }
+    };
+
+})();

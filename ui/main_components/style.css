@@ -11,7 +11,9 @@
     --color-danger: #da333d;
     --v-splitter-size: 16px;
     --h-splitter-size: 16px;
-    --consistency-safe-zone: 30%;
+    --consistency-safe-zone: 5%;
+    --panel-gap-size: 2px;
+    --master-spacing: 16px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -27,11 +29,11 @@ h1, h2, h3, h4 { text-transform: uppercase; letter-spacing: 1.5px; font-weight: 
 .ignition-module button { font-size: 1.2rem; color: #fff; background-color: var(--color-accent-primary); border: none; padding: 14px 28px; border-radius: 6px; cursor: pointer; text-transform: uppercase; letter-spacing: 2px; }
 .ignition-module button:disabled { background-color: #2c333d; color: #5a6472; cursor: not-allowed; }
 
-.cockpit-wrapper { width: 100vw; height: 100vh; padding: 16px; position: relative; }
-.cockpit-container { display: flex; flex-direction: column; height: 100%; width: 100%; gap: 16px; }
+.cockpit-wrapper { width: 100vw; height: 100vh; position: relative; padding: var(--master-spacing); }
+.cockpit-container { display: flex; flex-direction: column; height: 100%; width: 100%; gap: var(--panel-gap-size); }
 
-.main-view { flex: 1 1 auto; display: flex; gap: 16px; min-height: 0; }
-#bottom-bar { flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; transition: all 0.3s ease-in-out; }
+.main-view { flex: 1 1 auto; display: flex; gap: var(--panel-gap-size); min-height: 0; padding: 16px 16px 0 16px; }
+#bottom-bar { flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; transition: all 0.3s ease-in-out; padding: 8px 16px 16px 16px; }
 #bottom-bar.collapsed { min-height: 0 !important; height: 0 !important; overflow: hidden; padding: 0; margin-top: calc(-1 * var(--h-splitter-size)); }
 
 #left-col { flex: 1 1 60%; display: flex; min-width: 300px; }
@@ -128,7 +130,7 @@ tfoot tr { background-color: rgba(13, 17, 23, 0.8); font-weight: 700; }
 #an-flyout-tab { top: 220px; }
 
 /* Refined Gauge CSS */
-#consistency-gauge-wrapper { padding: 0; flex-shrink: 0; }
+#consistency-gauge-wrapper { padding: 8px 16px; flex-shrink: 0; }
 .gauge-header { display: flex; justify-content: space-between; align-items: center; margin: 0 0 8px 0; padding: 0; font-size: 0.8rem; font-weight: 700; color: var(--color-text-secondary); text-transform: uppercase; }
 .consistency-bar-wrapper { position: relative; width: 100%; padding-top: 16px; }
 .consistency-bar { width: 100%; height: 12px; border-radius: 6px; }

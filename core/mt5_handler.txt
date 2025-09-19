@@ -71,19 +71,49 @@ class MT5Handler:
                 return {"error": "Order Send Failed", "last_error": mt5.last_error()}
         except Exception as e: return {"error": str(e)}
 
+    # [ THE DEFINITIVE, ADAPTED FUNCTION ]
     def get_open_positions(self):
-        if not self._is_connected: return pd.DataFrame()
+        if not self._is_connected:
+            return pd.DataFrame()
+        
         positions = mt5.positions_get()
-        if not positions: return pd.DataFrame()
+        if not positions:
+            return pd.DataFrame()
+            
         df = pd.DataFrame(list(positions), columns=positions[0]._asdict().keys())
         df['Time'] = pd.to_datetime(df['time'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%Y.%m.%d %H:%M:%S')        
-        df['position_risk'] = df.apply(lambda p: abs(mt5.order_calc_profit(mt5.ORDER_TYPE_SELL if p['type'] == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY, p['symbol'], p['volume'], p['price_open'], p['sl'])) if p['sl'] > 0 else 0.0, axis=1)
+
+        # [ THE FIX ] --- This new logic no longer references 'commission' ---
+        def calculate_risk_without_commission(position):
+            # A position is considered at "Break-Even" if the SL is at or better than the entry price.
+            # While not perfect (doesn't account for costs), it's the safest assumption with available data.
+            is_break_even = (
+                (position['type'] == mt5.ORDER_TYPE_BUY and position['sl'] >= position['price_open']) or
+                (position['type'] == mt5.ORDER_TYPE_SELL and position['sl'] > 0 and position['sl'] <= position['price_open'])
+            )
+            
+            if position['sl'] > 0 and not is_break_even:
+                return abs(mt5.order_calc_profit(
+                    mt5.ORDER_TYPE_SELL if position['type'] == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+                    position['symbol'],
+                    position['volume'],
+                    position['price_open'],
+                    position['sl']
+                ) or 0.0)
+            else:
+                # If no SL or at BE, committed risk is zero
+                return 0.0
+
+        df['position_risk'] = df.apply(calculate_risk_without_commission, axis=1)
+        # --- [ END OF FIX ] ---
+
         df['position_reward'] = df.apply(lambda p: mt5.order_calc_profit(p['type'], p['symbol'], p['volume'], p['price_open'], p['tp']) if p['tp'] > 0 else 0.0, axis=1)
         df['position_rr'] = df.apply(lambda r: r['position_reward'] / r['position_risk'] if r['position_risk'] > 0 else 0, axis=1)
         df['Type'] = df['type'].apply(lambda x: 'Buy' if x == mt5.ORDER_TYPE_BUY else 'Sell')
         df.rename(columns={'symbol': 'Symbol', 'volume': 'Volume', 'profit': 'Profit', 'price_open': 'Price', 'sl': 'SL', 'tp': 'TP', 'ticket': 'Ticket'}, inplace=True)
+        
         return df[['Ticket', 'Time', 'Symbol', 'Type', 'Volume', 'Price', 'SL', 'TP', 'Profit', 'position_risk', 'position_rr']]
-    
+
     def get_pending_orders(self):
         if not self._is_connected: return pd.DataFrame()
         orders = mt5.orders_get()

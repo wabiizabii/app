@@ -241,3 +241,4 @@ ASSET_SPECIFICATIONS = {
 # You can find these in your Supabase project dashboard under Project Settings > API
 SUPABASE_URL = "https://xmqriscinxccbdggmtnb.supabase.co"    
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhtcXJpc2NpbnhjY2JkZ2dtdG5iIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MTEyMjU3MywiZXhwIjoyMDY2Njk4NTczfQ.YUX36ML3CZmya4h3CJSuZvlRjinbsPX3yTWBTduJc88"
+BROKER_TIMEZONE = "Etc/GMT-3"

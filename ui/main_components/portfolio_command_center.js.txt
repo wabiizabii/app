@@ -1,0 +1,233 @@
+// ==============================================================================
+// FILE: portfolio_command_center.js (DEFINITIVE, FINAL VERSION)
+// ==============================================================================
+
+const PortfolioCommandCenter = {
+    _socket: null,
+    _selectors: {},
+    _isConnected: false,
+    _portfolios: [],
+    _stagedData: null, // State for holding processed data before saving
+
+    init: function() {
+        console.log("Portfolio Command Center Initializing...");
+        const template = document.getElementById('portfolio-command-center-template');
+        if (!template) {
+            console.error("PCC FATAL: Template not found.");
+            return;
+        }
+        document.body.appendChild(template.content.cloneNode(true));
+
+        this._selectors = {
+            launchBtn: document.getElementById('launch-portfolio-command-btn'),
+            modalOverlay: document.getElementById('pcc-modal-overlay'),
+            closeBtn: document.getElementById('pcc-close-btn'),
+            tabContainer: document.querySelector('.pcc-tabs'),
+            paneContainer: document.querySelector('.pcc-content'),
+            managePane: document.getElementById('pcc-manage-pane'),
+            uploadPane: document.getElementById('pcc-upload-pane')
+        };
+        
+        this._attachEventListeners();
+        this._connectToServer();
+    },
+
+    _attachEventListeners: function() {
+        this._selectors.launchBtn?.addEventListener('click', () => {
+            this._selectors.modalOverlay?.classList.remove('hidden');
+            // We now request portfolios AFTER connection is confirmed in onopen
+        });
+        this._selectors.closeBtn?.addEventListener('click', () => this._selectors.modalOverlay?.classList.add('hidden'));
+        this._selectors.modalOverlay?.addEventListener('click', (e) => {
+            if (e.target === this._selectors.modalOverlay) this._selectors.modalOverlay.classList.add('hidden');
+        });
+
+        this._selectors.tabContainer?.addEventListener('click', (e) => {
+            if (!e.target.matches('.pcc-tab-btn')) return;
+            const targetPaneId = e.target.dataset.target;
+            this._selectors.tabContainer.querySelectorAll('.pcc-tab-btn').forEach(btn => btn.classList.remove('active'));
+            e.target.classList.add('active');
+            this._selectors.paneContainer.querySelectorAll('.pcc-content-pane').forEach(pane => {
+                pane.classList.toggle('active', pane.id === targetPaneId);
+            });
+        });
+        
+        this._selectors.managePane?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            // ... (no changes in this part)
+        });
+
+        this._selectors.uploadPane?.addEventListener('click', (e) => {
+            if (e.target.id === 'pcc-upload-confirm-btn') {
+                this._handleSaveConfirmation();
+            }
+        });
+
+        this._selectors.uploadPane?.addEventListener('change', (e) => {
+            if (e.target.id === 'pcc-file-uploader') {
+                const file = e.target.files[0];
+                if (file) {
+                    this._handleFileUpload(file);
+                }
+            }
+        });
+    },
+    
+    _handleFileUpload: function(file) {
+        const selectedPortfolioId = document.getElementById('pcc-upload-portfolio-select').value;
+        if (!selectedPortfolioId) {
+            const feedbackEl = document.getElementById('pcc-upload-feedback');
+            if (feedbackEl) {
+                feedbackEl.innerHTML = `<p style="color: var(--color-danger);">❌ Please select a target portfolio first.</p>`;
+            }
+            document.getElementById('pcc-file-uploader').value = '';
+            return;
+        }
+        this._stagedData = null;
+        this._renderUploadPane();
+        const feedbackEl = document.getElementById('pcc-upload-feedback');
+        if (feedbackEl) feedbackEl.innerHTML = `<p><i>Processing "${file.name}"... Please wait.</i></p>`;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const fileContent = event.target.result;
+            this._sendMessage('UPLOAD_STATEMENT', {
+                portfolio_id: selectedPortfolioId,
+                file_name: file.name,
+                file_content: fileContent
+            });
+        };
+        reader.onerror = () => {
+            if (feedbackEl) {
+                feedbackEl.innerHTML = `<p style="color: var(--color-danger);">❌ Failed to read the selected file.</p>`;
+            }
+        };
+        reader.readAsText(file, 'UTF-8');
+    },
+
+    _handleSaveConfirmation: function() {
+        if (!this._stagedData) {
+            alert("No processed data is staged for saving.");
+            return;
+        }
+        const feedbackEl = document.getElementById('pcc-upload-feedback');
+        if (feedbackEl) feedbackEl.innerHTML = `<p><i>Saving to database... Please wait.</i></p>`;
+        this._sendMessage('SAVE_PROCESSED_DATA', this._stagedData);
+    },
+
+    _connectToServer: function() {
+        console.log("PCC: _connectToServer function has been EXECUTED. Attempting connection to ws://localhost:5556...");
+        this._socket = new WebSocket('ws://localhost:5556');
+        
+        this._socket.onopen = () => { 
+            console.log("✅ PCC: Connection established! (onopen event has fired)"); 
+            this._isConnected = true; 
+            // Immediately request the portfolio list now that we are connected.
+            this._requestAllPortfolios(); 
+        };
+        
+        this._socket.onclose = (event) => { 
+            console.warn("PCC: Connection closed.", event); 
+            this._isConnected = false; 
+        };
+        
+        this._socket.onerror = (error) => { 
+            console.error("PCC WebSocket Error:", error); 
+        };
+        
+        this._socket.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            console.log("PCC Received Event:", message.event, "| Payload:", message.payload);
+            const feedbackEl = document.getElementById('pcc-upload-feedback');
+
+            if (message.event === "PORTFOLIO_LIST_DATA") {
+                this._portfolios = message.payload.portfolios || [];
+                // Re-render both panes to display the new data
+                this._renderManagePane();
+                this._renderUploadPane(); 
+            } 
+            else if (message.event === "OPERATION_STATUS") {
+                if (message.request_event === 'UPLOAD_STATEMENT') {
+                    if (message.payload.success && message.payload.data) {
+                        this._stagedData = message.payload.data; 
+                        this._stagedData.portfolio_id = document.getElementById('pcc-upload-portfolio-select').value;
+                        this._stagedData.file_name = document.getElementById('pcc-file-uploader').files[0]?.name || 'unknown.htm';
+                        this._renderUploadPane();
+                    } else {
+                        if (feedbackEl) feedbackEl.innerHTML = `<p style="color: var(--color-danger);">❌ Error: ${message.payload.message}</p>`;
+                    }
+                } 
+                else if (message.request_event === 'SAVE_PROCESSED_DATA') {
+                     if (message.payload.success) {
+                        if (feedbackEl) feedbackEl.innerHTML = `<p style="color: var(--color-success);">✅ Success: ${message.payload.message}</p>`;
+                        this._stagedData = null;
+                        document.getElementById('pcc-file-uploader').value = '';
+                        setTimeout(() => this._renderUploadPane(), 2000);
+                    } else {
+                        if (feedbackEl) feedbackEl.innerHTML = `<p style="color: var(--color-danger);">❌ Error saving data: ${message.payload.message}</p>`;
+                    }
+                }
+            }
+        };
+     },
+
+    _sendMessage: function(event, payload = {}) {
+        if (this._isConnected) {
+            this._socket.send(JSON.stringify({ event, payload }));
+        } else {
+            console.error("PCC: Cannot send message, not connected to server.");
+        }
+    },
+    
+    _requestAllPortfolios: function() {
+        console.log("PCC: Requesting all portfolios from server...");
+        this._sendMessage("GET_ALL_PORTFOLIOS");
+    },
+    
+    _renderManagePane: function() {
+        if (!this._selectors.managePane) return;
+        const portfolioListHTML = this._portfolios.map(p => `<div class="portfolio-list-item"><span>${p.PortfolioName} (${p.mt5_account_id || 'No MT5 ID'})</span></div>`).join('');
+        const formHTML = (p = {}) => `<form class="pcc-form" data-id="${p.PortfolioID || ''}"><div class="pcc-form-grid"><div class="pcc-form-group"><label>Portfolio Name</label><input type="text" name="PortfolioName" value="${p.PortfolioName || ''}" required></div><div class="pcc-form-group"><label>Initial Balance</label><input type="number" name="InitialBalance" value="${p.InitialBalance || '10000'}" step="100"></div><div class="pcc-form-group"><label>MT5 Account ID</label><input type="text" name="mt5_account_id" value="${p.mt5_account_id || ''}"></div><div class="pcc-form-group"><label>Profit Target (%)</label><input type="number" name="ProfitTargetPercent" value="${p.ProfitTargetPercent || '8'}"></div><div class="pcc-form-group"><label>Max Daily Loss (%)</label><input type="number" name="DailyLossLimitPercent" value="${p.DailyLossLimitPercent || '5'}"></div><div class="pcc-form-group"><label>Max Overall Loss (%)</label><input type="number" name="TotalStopoutPercent" value="${p.TotalStopoutPercent || '10'}"></div><div class="pcc-form-group"><label>Profit Consistency (%)</label><input type="number" name="ProfitConsistencyRulePercent" value="${p.ProfitConsistencyRulePercent || '30'}"></div></div><button type="submit" class="pcc-submit-btn">${p.PortfolioID ? 'Save Changes' : 'Create Portfolio'}</button></form>`;
+        this._selectors.managePane.innerHTML = `<div class="pcc-manage-layout"><div class="pcc-list-panel"><h4>Your Fleet</h4><div class="portfolio-list">${portfolioListHTML || '<p>No portfolios found.</p>'}</div></div><div class="pcc-edit-panel"><div class="pcc-form-container"><h4>Create New Portfolio</h4>${formHTML()}</div></div></div>`;
+    },
+
+    _renderUploadPane: function() {
+        if (!this._selectors.uploadPane) return;
+        const currentSelection = document.getElementById('pcc-upload-portfolio-select')?.value;
+        const optionsHTML = this._portfolios.map(p => `<option value="${p.PortfolioID}" ${currentSelection === p.PortfolioID ? 'selected' : ''}>${p.PortfolioName} (${p.mt5_account_id || 'N/A'})</option>`).join('');
+        let feedbackHTML = '<p>Please select a portfolio and a statement file to begin.</p>';
+
+        if (this._stagedData) {
+            const summary = this._stagedData.final_summary_data || {};
+            const deals = Array.isArray(this._stagedData.deals) ? this._stagedData.deals : [];
+            const deals_count = deals.length;
+
+            feedbackHTML = `
+                <div class="pcc-preview">
+                    <h4>Preview of Processed Data</h4>
+                    <p><strong>Deals Found:</strong> ${deals_count}</p>
+                    <p><strong>Total Net Profit:</strong> ${summary.Total_Net_Profit_Calculated?.toFixed(2) || 'N/A'}</p>
+                    <p><strong>Profit Factor:</strong> ${summary.Profit_Factor_Value?.toFixed(2) || 'N/A'}</p>
+                </div>
+                <button id="pcc-upload-confirm-btn" class="pcc-submit-btn">Confirm & Save to Database</button>
+            `;
+        }
+
+        this._selectors.uploadPane.innerHTML = `
+            <h4>Data Ingestion Dock</h4>
+            <div class="pcc-form-group">
+                <label for="pcc-upload-portfolio-select">Target Portfolio</label>
+                <select id="pcc-upload-portfolio-select" class="pcc-select"><option value="">-- Select a Portfolio --</option>${optionsHTML}</select>
+            </div>
+            <div class="pcc-form-group">
+                <label for="pcc-file-uploader">MT5 Statement File (.htm)</label>
+                <input type="file" id="pcc-file-uploader" class="pcc-file-input" accept=".htm,.html">
+            </div>
+            <div id="pcc-upload-feedback" class="pcc-upload-feedback">${feedbackHTML}</div>
+        `;
+        
+        const selectEl = document.getElementById('pcc-upload-portfolio-select');
+        if (selectEl && currentSelection) {
+            selectEl.value = currentSelection;
+        }
+    }
+};
