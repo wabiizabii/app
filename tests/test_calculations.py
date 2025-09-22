@@ -9,7 +9,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from services.mt5_data_streamer import calculate_dashboard_metrics
+from core.calculation_engine import calculate_dashboard_metrics
 
 # Test Case 1: Adheres to the new "Fixed Ceiling" and "Committed Risk" rules.
 def test_simple_scenario_aligned_with_blueprint():
