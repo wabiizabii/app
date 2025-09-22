@@ -1,0 +1,40 @@
+# .github/workflows/python-ci.yml
+
+# 1. ตั้งชื่อ Workflow ของเรา
+name: Obsidian Guardian Sentry
+
+# 2. กำหนด "ตัวกระตุ้น" (Trigger)
+on:
+  push:
+    branches: [ "main", "master", "develop" ] # รันเมื่อมีการ push ไปยัง branch เหล่านี้
+  pull_request:
+    branches: [ "main", "master" ] # รันเมื่อมีการสร้าง Pull Request มายัง branch เหล่านี้
+
+# 3. กำหนด "งาน" (Jobs) ที่จะทำ
+jobs:
+  build:
+    # 4. กำหนด "สภาพแวดล้อม" ที่จะใช้ทำงาน
+    runs-on: ubuntu-latest # ใช้คอมพิวเตอร์เสมือนที่เป็น Linux (เร็วกว่าและฟรี)
+
+    # 5. กำหนด "ขั้นตอน" (Steps) การทำงาน
+    steps:
+    # ขั้นตอนที่ 1: ดาวน์โหลดโค้ดล่าสุดของเรา
+    - uses: actions/checkout@v3
+
+    # ขั้นตอนที่ 2: ตั้งค่าสภาพแวดล้อม Python
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    # ขั้นตอนที่ 3: ติดตั้งไลบรารีที่จำเป็นทั้งหมด
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest # ติดตั้ง pytest โดยตรงใน runner
+
+    # ขั้นตอนที่ 4: รัน "หน่วยองครักษ์" (The Guardian Unit)
+    - name: Run Pytest Guardians
+      run: |
+        python -m pytest tests/

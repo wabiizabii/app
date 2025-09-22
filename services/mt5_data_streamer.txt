@@ -1,9 +1,10 @@
 # ==============================================================================
-# FILE: services/mt5_data_streamer.py (VERSION: SYSTEM_INTEGRITY_CORRECTED)
+# FILE: services/mt5_data_streamer.py (VERSION: FINAL_INTEGRATED_STABLE)
 # ==============================================================================
-import sys, os, asyncio, json, websockets, pandas as pd, traceback, uuid, functools, time
-from datetime import datetime, timezone, time as dt_time, timedelta
-import numpy as np, pytz
+import sys, os, asyncio, json, websockets, pandas as pd, traceback, uuid, functools
+from datetime import datetime, timedelta
+import numpy as np
+import pytz
 import MetaTrader5 as mt5
 
 # --- Project Root Setup ---
@@ -26,300 +27,236 @@ def json_converter(o):
     if isinstance(o, (np.floating, np.float64)): return float(o) if not np.isnan(o) else None
     return str(o)
 
-# [ แทนที่ฟังก์ชันเดิมทั้งหมดของคุณด้วยฟังก์ชันนี้ ]
+def calculate_dashboard_metrics(opening_balance, equity, history_df, positions_df, pending_orders_df):
+    """
+    The definitive calculation engine, with the correct "Dynamic Risk Ceiling"
+    logic restored and integrated with the Captain's full blueprint.
+    """
+    metrics = {}
+    
+    opening_balance = float(opening_balance) if opening_balance is not None else 0.0
+    equity = float(equity) if equity is not None else 0.0
+
+    # --- Module 2: Live Equity & Total Daily P/L ---
+    # The single source of truth for overall daily performance.
+    total_daily_pl = equity - opening_balance
+    metrics['session_total_pl'] = total_daily_pl
+
+    # --- Module 4: Session P/L (Realized P/L) ---
+    # The single source of truth for closed trades.
+    realized_pl = history_df['Net P/L'].sum() if not history_df.empty else 0.0
+    metrics['realized_pl'] = realized_pl
+
+    # --- Module 3: Daily Risk (The Gatekeeper with DYNAMIC CEILING) ---
+    DAILY_RISK_PERCENT = 0.01 # The PERCENTAGE is fixed for the day.
+
+    # 1. Calculate the INITIAL risk allowance based on the opening balance.
+    initial_risk_allowance = opening_balance * DAILY_RISK_PERCENT
+    
+    # 2. Calculate realized GAINS from today's closed trades.
+    realized_gains = history_df[history_df['Net P/L'] > 0]['Net P/L'].sum() if not history_df.empty else 0.0
+    
+    # 3. The DYNAMIC CEILING: The risk limit for the day INCREASES with realized profits.
+    dynamic_risk_ceiling = initial_risk_allowance + realized_gains
+    scaled_dynamic_ceiling = dynamic_risk_ceiling * 0.9 # Apply the 0.9 scaling factor
+    metrics['ddl_limit_usd'] = scaled_dynamic_ceiling
+
+    # 4. "Used" risk is the SUM of realized losses AND committed risk from open/pending trades.
+    realized_losses = abs(history_df[history_df['Net P/L'] < 0]['Net P/L'].sum()) if not history_df.empty else 0.0
+    risk_from_open_pos = positions_df['position_risk'].sum() if not positions_df.empty else 0.0
+    risk_from_pending_orders = pending_orders_df['position_risk'].sum() if not pending_orders_df.empty else 0.0
+    
+    total_used_risk = realized_losses + risk_from_open_pos + risk_from_pending_orders
+    metrics['ddl_used_usd'] = total_used_risk
+
+    # 5. "Left" is the dynamic ceiling minus the total used risk.
+    metrics['ddl_left_usd'] = max(0, scaled_dynamic_ceiling - total_used_risk)
+
+    # --- RPT (Risk Per Trade) ---
+    # RPT Limit is based on the INITIAL risk allowance, not the dynamic one.
+    rpt_limit = initial_risk_allowance * 0.9
+    metrics['rpt_limit_usd'] = rpt_limit
+    # RPT Available is what's left for the day, but cannot exceed the RPT limit.
+    metrics['rpt_available_usd'] = min(metrics['ddl_left_usd'], rpt_limit)
+
+    # --- Target Calculation ---
+    # Target is 3R of the INITIAL Max Daily Risk Limit.
+    metrics['pl_target'] = initial_risk_allowance * 3.0
+
+    # --- Other Metrics ---
+    metrics['unrealized_pl'] = positions_df['Profit'].sum() if not positions_df.empty else 0.0
+    
+    # Profit Consistency (Logic remains the same)
+    profit_consistency_percent = 0.0
+    highest_profit_day = 0.0
+    if not history_df.empty:
+        daily_profits = history_df.groupby(pd.to_datetime(history_df['Close Time']).dt.date)['Net P/L'].sum()
+        if not daily_profits.empty:
+            highest_profit_day = daily_profits.max()
+        if highest_profit_day > 0 and realized_pl > 0:
+            profit_consistency_percent = (highest_profit_day / realized_pl) * 100
+            
+    metrics['profit_consistency_percent'] = profit_consistency_percent
+    metrics['highest_profit_day'] = highest_profit_day
+
+    return metrics
+
 async def fetch_and_broadcast_data(mt5_handler: MT5Handler, supabase_handler: HeadlessSupabaseHandler):
-    while True:
+    while not SHUTDOWN_EVENT.is_set():
         payload = {}
         try:
             if SESSION_STATE["status"] == "SESSION_ACTIVE":
                 current_account_info = mt5.account_info()
-                # Refined Check with clearer message
                 if not current_account_info or str(current_account_info.login) != SESSION_STATE.get("mt5_account_id"):
-                    print(f"\n--- TACTICAL SHUTDOWN ---")
-                    print(f"Reason: Live MT5 Account ({current_account_info.login if current_account_info else 'N/A'}) does not match Session Account ({SESSION_STATE.get('mt5_account_id')}).")
-                    print(f"This is a safety measure to prevent operating on the wrong account. Please restart the script.")
-                    print(f"---------------------------\n")
-                    SHUTDOWN_EVENT.set()
-                    return
-
+                    print(f"\n--- TACTICAL SHUTDOWN ---\n"); SHUTDOWN_EVENT.set(); return
+                
+                # --- [SYNCHRONIZED DATA GATHERING] ---
                 opening_balance = SESSION_STATE["opening_balance"]
                 equity = current_account_info.equity
-
                 positions_df = mt5_handler.get_open_positions()
                 pending_orders_df = mt5_handler.get_pending_orders()
-
                 session_start_utc = SESSION_STATE["session_start_time_utc"]
-                session_end_utc = session_start_utc + timedelta(hours=23, minutes=59, seconds=59)
-
-                history_df = mt5_handler.get_trade_history(start_date=session_start_utc, end_date=session_end_utc)
-
-                # [ START OF SURGICAL REPLACEMENT ]
-                # The old logic has been removed and replaced with this new, correct engine.
-
-                unrealized_pl = positions_df['Profit'].sum() if not positions_df.empty else 0.0
-                session_total_pl = equity - opening_balance
-
-                ddl_percent = SESSION_STATE.get("ddl_percent", 0.01)
-
-                initial_risk_limit_usd = opening_balance * ddl_percent
-
-                realized_gains = history_df[history_df['Net P/L'] > 0]['Net P/L'].sum() if not history_df.empty else 0.0
-
-                dynamic_risk_ceiling_usd = initial_risk_limit_usd + realized_gains
-
-                realized_losses = abs(history_df[history_df['Net P/L'] < 0]['Net P/L'].sum()) if not history_df.empty else 0.0
-
-                open_positions_risk = positions_df['position_risk'].sum() if not positions_df.empty else 0.0
-
-                pending_orders_risk = pending_orders_df['position_risk'].sum() if not pending_orders_df.empty else 0.0
-
-                total_used_risk_usd = realized_losses + open_positions_risk + pending_orders_risk
-
-                risk_left_usd = max(0, dynamic_risk_ceiling_usd - total_used_risk_usd)
-
-                # We now rename the variables for consistency with the rest of your code
-                ddl_limit_usd = dynamic_risk_ceiling_usd
-                ddl_used_usd = total_used_risk_usd
-                ddl_left_usd = risk_left_usd
-
-                # [ END OF SURGICAL REPLACEMENT ]
-
-                risk_unit_usd = opening_balance * 0.01 # This is for R-Unit, not DDL
-                total_open_risk = positions_df['position_risk'].sum() if not positions_df.empty else 0.0
-                theoretical_rpt_limit = (opening_balance * 0.01) * 0.90 
-                rpt_limit_usd = min(theoretical_rpt_limit, risk_left_usd)
-                total_potential_risk = open_positions_risk + pending_orders_risk
-                rpt_available_usd = max(0, rpt_limit_usd - total_potential_risk)
-                pl_target = ddl_limit_usd / 0.9 * 1.5 if ddl_limit_usd > 0 else (opening_balance * ddl_percent) * 1.5 # Target calculation adjusted for dynamic ceiling
-
-                # Profit Consistency Calculation
-                profit_consistency_percent = 0.0
-                if not history_df.empty:
-                    winning_trades = history_df[history_df['Net P/L'] > 0]
-                    if not winning_trades.empty:
-                        total_win_profit = winning_trades['Net P/L'].sum()
-                        largest_win_profit = winning_trades['Net P/L'].max()
-                        if total_win_profit > 0:
-                            profit_consistency_percent = (largest_win_profit / total_win_profit) * 100
-
+                # Use a consistent end time for all calculations
+                end_of_session_utc = datetime.now(pytz.utc) 
+                history_df = mt5_handler.get_trade_history(start_date=session_start_utc, end_date=end_of_session_utc)
+                
+                # --- [SINGLE CALCULATION CALL] ---
+                metrics = calculate_dashboard_metrics(opening_balance, equity, history_df, positions_df, pending_orders_df)
+                
+                # --- [PAYLOAD CONSTRUCTION] ---
                 payload = {
-                            "status": "SESSION_ACTIVE", "equity": equity, "opening_balance": opening_balance,
-                            "daily_pl_total_usd": session_total_pl,
-                            "daily_pl_total_percent": (session_total_pl / opening_balance * 100) if opening_balance > 0 else 0.0,
-                            "ddl_percent_setting": ddl_percent,
-                            "ddl_limit_usd": ddl_limit_usd, 
-                            "ddl_used_usd": ddl_used_usd, 
-                            "ddl_left_usd": ddl_left_usd,
-                            "realized_pl": history_df['Net P/L'].sum() if not history_df.empty else 0.0,
-                            "pl_target": pl_target,
-                            "profit_consistency_percent": profit_consistency_percent,
-
-                            # [ CRITICAL SYNCHRONIZATION ] ---
-                            # Ensure these two lines are present and use the new variables
-                            "rpt_available_usd": rpt_available_usd,
-                            "rpt_limit_usd": rpt_limit_usd, # This now correctly reflects the true, lower ceiling
-                            # --- [ END SYNCHRONIZATION ] ---
-
-                            "open_positions_total_profit": unrealized_pl,
-                            "open_positions_total_risk": total_open_risk, # Corrected to use the variable we already have
-                            "history_total_profit": history_df['Net P/L'].sum() if not history_df.empty else 0.0,
-                            "risk_unit_usd": risk_unit_usd, # You might want to remove this if it's no longer used on the frontend
-                            "open_positions": positions_df.to_dict('records'),
-                            "pending_orders": pending_orders_df.to_dict('records'),
-                            "trade_history": history_df.to_dict('records'),
-                            "all_symbols": list(SESSION_STATE.get("symbol_properties", {}).keys()),
-                            "portfolio_context": SESSION_STATE.get("portfolio_context"),
-                            "mt5_account_id": SESSION_STATE.get("mt5_account_id"),
-                        }            
-            else:
-                payload = {
-                    "status": SESSION_STATE.get("status"),
-                    "suggested_balance": SESSION_STATE.get("suggested_balance", 0.0),
-                    "broker_name": SESSION_STATE.get("broker_name"),
-                    "suggested_offset": 3
+                    "status": "SESSION_ACTIVE", "equity": equity, "opening_balance": opening_balance,
+                    "daily_pl_total_usd": metrics['session_total_pl'],
+                    "daily_pl_total_percent": (metrics['session_total_pl'] / opening_balance * 100) if opening_balance > 0 else 0.0,
+                    "ddl_limit_usd": metrics['ddl_limit_usd'], "ddl_used_usd": metrics['ddl_used_usd'], "ddl_left_usd": metrics['ddl_left_usd'],
+                    "realized_pl": metrics['realized_pl'], # This is the correct value for Session P/L
+                    "pl_target": metrics['pl_target'],
+                    "profit_consistency_percent": metrics['profit_consistency_percent'],
+                    "highest_profit_day": metrics['highest_profit_day'], # Send this to the frontend
+                    "rpt_available_usd": metrics['rpt_available_usd'], "rpt_limit_usd": metrics['rpt_limit_usd'],
+                    "open_positions_total_profit": metrics['unrealized_pl'],
+                    "open_positions": positions_df.to_dict('records'),
+                    "pending_orders": pending_orders_df.to_dict('records'),
+                    "trade_history": history_df.to_dict('records'),
+                    "all_symbols": list(SESSION_STATE.get("symbol_properties", {}).keys()),
+                    "portfolio_context": SESSION_STATE.get("portfolio_context"),
+                    "mt5_account_id": SESSION_STATE.get("mt5_account_id"),
                 }
+            else:
+                payload = { "status": SESSION_STATE.get("status"), "suggested_balance": SESSION_STATE.get("suggested_balance", 0.0), "broker_name": SESSION_STATE.get("broker_name"), "suggested_offset": 3 }
             
             if CONNECTED_CLIENTS:
                 await asyncio.gather(*(client.send(json.dumps(payload, default=json_converter)) for client in CONNECTED_CLIENTS))
             
             await asyncio.sleep(2)
-
-        except websockets.exceptions.ConnectionClosed:
-            await asyncio.sleep(2) 
-
         except Exception as e:
-            print(f"ERROR in broadcast loop: {e}")
-            traceback.print_exc()
-            await asyncio.sleep(5)
+            print(f"ERROR in broadcast loop: {e}"); traceback.print_exc(); await asyncio.sleep(5)
 
-# [ THE DEFINITIVE, CORRECTED VERSION ]
 async def handle_client_commands(websocket, mt5_handler: MT5Handler, supabase_handler: HeadlessSupabaseHandler):
     global SESSION_STATE
     async for message in websocket:
         try:
             command = json.loads(message)
             event, payload = command.get("event"), command.get("payload", {})
-
             if event == "CONFIRM_TIMEZONE":
                 offset = int(payload.get("offset"))
                 broker_name = SESSION_STATE.get("broker_name")
-                if broker_name and broker_name != 'Unknown Broker':
-                    success = supabase_handler.set_broker_timezone(broker_name, offset)
-                    if success:
-                        print(f"Timezone for '{broker_name}' confirmed. Re-evaluating system state.")
-                        await initialize_system_state(mt5_handler, supabase_handler)
-                else:
-                    print("ERROR: Cannot confirm timezone for an unknown broker.")
-
+                if broker_name and supabase_handler.set_broker_timezone(broker_name, offset):
+                    print(f"✅ Timezone for '{broker_name}' confirmed. Re-initializing...")
+                    await initialize_system_state(mt5_handler, supabase_handler)
             elif event == "START_SESSION":
                 user_confirmed_balance = float(payload.get("openingBalance", 0.0))
                 if user_confirmed_balance > 0 and SESSION_STATE.get("status") == "READY_TO_START":
-                    broker_date_str = SESSION_STATE.get("broker_date_str")
-                    success = supabase_handler.set_daily_opening_balance(
-                        SESSION_STATE.get("portfolio_id"), 
-                        SESSION_STATE.get("mt5_account_id"), 
-                        user_confirmed_balance,
-                        broker_date_str
-                    )
-                    if success:
-                        # [ THE FIX ] --- We now AUGMENT the state, not OVERWRITE it ---
+                    if supabase_handler.set_daily_opening_balance(SESSION_STATE.get("portfolio_id"), SESSION_STATE.get("mt5_account_id"), user_confirmed_balance, SESSION_STATE.get("broker_date_str")):
                         SESSION_STATE["opening_balance"] = user_confirmed_balance
                         SESSION_STATE["status"] = "SESSION_ACTIVE"
-                        # --- End of Fix ---
-                        
-                        print(f"\n✅ SESSION ACTIVATED for account {SESSION_STATE.get('mt5_account_id')} with user-confirmed balance: {user_confirmed_balance}\n")
-                else:
-                    print(f"WARNING: Could not start session. Balance: {user_confirmed_balance}, Status: {SESSION_STATE.get('status')}")
-
-            elif event == "UPDATE_DDL_SETTING":
-                new_ddl_percent = float(payload.get("ddl_percent"))
-                portfolio_id = SESSION_STATE.get("portfolio_id")
-
-                if portfolio_id and new_ddl_percent:
-                    success = supabase_handler.update_portfolio_settings(
-                        portfolio_id, 
-                        {"DailyLossLimitPercent": new_ddl_percent}
-                    )
-                    if success:
-                        SESSION_STATE["ddl_percent"] = new_ddl_percent
-                        print(f"✅ Daily Risk for portfolio {portfolio_id} updated to {new_ddl_percent*100}%.")
-                    else:
-                        print(f"❌ FAILED to update Daily Risk for portfolio {portfolio_id}.")
-
+                        print(f"\n✅ SESSION ACTIVATED\n")
         except Exception as e:
-            print(f"Error processing client command: {e}")
-            traceback.print_exc()
+            print(f"ERROR in handle_client_commands: {e}"); traceback.print_exc()
 
 async def client_handler(websocket, mt5_handler, supabase_handler):
-    print(f"Client connected: {websocket.remote_address}")
     CONNECTED_CLIENTS.add(websocket)
     try:
-        # Send initial state immediately upon connection
-        initial_payload = {
-            "status": SESSION_STATE.get("status"),
-            "suggested_balance": SESSION_STATE.get("suggested_balance", 0.0),
-            "broker_name": SESSION_STATE.get("broker_name"),
-            "suggested_offset": 3
-        }
-        await websocket.send(json.dumps(initial_payload, default=json_converter))
-        
+        await websocket.send(json.dumps({ "status": SESSION_STATE.get("status"), "broker_name": SESSION_STATE.get("broker_name") }, default=json_converter))
         await handle_client_commands(websocket, mt5_handler, supabase_handler)
-    except websockets.exceptions.ConnectionClosed:
-        print(f"Client disconnected normally: {websocket.remote_address}")
     finally:
         CONNECTED_CLIENTS.remove(websocket)
 
-# [ แทนที่ฟังก์ชันเดิมทั้งหมดของคุณด้วยฟังก์ชันนี้ ]
+# แทนที่ฟังก์ชัน initialize_system_state เดิมทั้งหมดด้วยโค้ดนี้
+
+# [VERSION: ULTIMATE_FALLBACK & STABLE]
 async def initialize_system_state(mt5_handler: MT5Handler, supabase_handler: HeadlessSupabaseHandler):
     global SESSION_STATE
-    # Hard reset on every startup to prevent state desync
     SESSION_STATE = { "status": "INITIALIZING" }
-
-    account_info = mt5_handler.get_account_info()
-    mt5_id_str = str(account_info.get('login'))
-    
-    terminal_info = mt5.terminal_info()
-    broker_identifier = terminal_info.company if terminal_info else "Unknown Broker"
-    
-    SESSION_STATE.update({ "mt5_account_id": mt5_id_str, "broker_name": broker_identifier })
-    print(f"Connected to Broker: {broker_identifier}, Account: {mt5_id_str}")
-
-    broker_offset = supabase_handler.get_broker_timezone(broker_identifier)
-    if broker_offset is None:
-        SESSION_STATE["status"] = "REQUIRE_TIMEZONE_CONFIRMATION"
-        return
-
-    # --- This logic now correctly handles BOTH new and existing portfolios ---
-    portfolio_context = supabase_handler.get_portfolio_by_mt5_account_id(mt5_id_str)
-    if not portfolio_context:
-        print(f"INFO: No portfolio found for MT5 ID {mt5_id_str}. Auto-provisioning new portfolio.")
-        new_portfolio_id = str(uuid.uuid4())
-        new_portfolio_data = {
-            "PortfolioID": new_portfolio_id, "mt5_account_id": mt5_id_str, "PortfolioName": f"MT5 Acct {mt5_id_str}",
-            "DailyLossLimitPercent": 0.01, "ConsistencyThresholdPercent": 30
-        }
-        portfolio_context, msg = supabase_handler.insert_new_portfolio(new_portfolio_data)
-        if not portfolio_context:
-            print("CRITICAL: Failed to create portfolio context. Halting.")
+    print("\n--- [REBOOT] Initializing System State ---")
+    try:
+        account_info = mt5_handler.get_account_info()
+        if not account_info: raise Exception("Could not get account info from MT5.")
+        
+        mt5_id_str = str(account_info.get('login'))
+        broker_identifier = account_info.get('server_name', "Unknown Broker")
+        
+        SESSION_STATE.update({ "mt5_account_id": mt5_id_str, "broker_name": broker_identifier })
+        print(f"-> MT5 Connection: OK (Broker: {broker_identifier}, Account: {mt5_id_str})")
+        
+        broker_offset = supabase_handler.get_broker_timezone(broker_identifier)
+        if broker_offset is None:
+            SESSION_STATE["status"] = "REQUIRE_TIMEZONE_CONFIRMATION"
+            print(f"-> STATE: Timezone for '{broker_identifier}' is unknown.")
             return
+        
+        print(f"-> Timezone: OK (Offset: {broker_offset})")
+        
+        portfolio_context = supabase_handler.get_portfolio_by_mt5_account_id(mt5_id_str)
+        if not portfolio_context:
+            print(f"INFO: No portfolio for MT5 ID {mt5_id_str}. Auto-provisioning...")
+            new_portfolio_data = {
+                "PortfolioID": str(uuid.uuid4()), "mt5_account_id": mt5_id_str, "PortfolioName": f"MT5 Acct {mt5_id_str}",
+                "BrokerName": broker_identifier, "DailyLossLimitPercent": 0.01,
+                "InitialBalance": account_info.get('balance', 0.0)
+            }
+            portfolio_context, _ = supabase_handler.insert_new_portfolio(new_portfolio_data)
+            if not portfolio_context: raise Exception("Failed to auto-provision portfolio.")
+        
+        print(f"-> Portfolio: OK (Name: {portfolio_context.get('PortfolioName')})")
+        
+        portfolio_id = str(portfolio_context.get("PortfolioID"))
+        broker_date_str = mt5_handler.get_broker_now(broker_offset).strftime('%Y-%m-%d')
+        session_start_utc = mt5_handler.get_session_start_time_utc(broker_offset)
+        
+        SESSION_STATE.update({
+            "portfolio_context": portfolio_context, "portfolio_id": portfolio_id,
+            "symbol_properties": mt5_handler.get_all_symbol_properties(),
+            "broker_date_str": broker_date_str, "session_start_time_utc": session_start_utc
+        })
+        print(f"-> Session Context: OK (Date: {broker_date_str})")
 
-    # --- All data is now fetched. Prepare for a single, definitive state update. ---
-    portfolio_id = str(portfolio_context.get("PortfolioID"))
-    
-    ddl_percent = portfolio_context.get("DailyLossLimitPercent")
-    if ddl_percent is None: ddl_percent = 0.01 # Defensive guard for old records
-    
-    broker_now = mt5_handler.get_broker_now(broker_offset)
-    broker_date_str = broker_now.strftime('%Y-%m-%d')
-    session_start_utc = mt5_handler.get_session_start_time_utc(broker_offset)
-    
-    SESSION_STATE.update({
-        "portfolio_context": portfolio_context, "portfolio_id": portfolio_id,
-        "symbol_properties": mt5_handler.get_all_symbol_properties(),
-        "ddl_percent": ddl_percent, "broker_date_str": broker_date_str,
-        "session_start_time_utc": session_start_utc
-    })
+        existing_balance = supabase_handler.get_daily_opening_balance(portfolio_id, mt5_id_str, broker_date_str)
+        
+        if existing_balance is not None:
+            SESSION_STATE.update({ "opening_balance": existing_balance, "status": "SESSION_ACTIVE" })
+            print(f"✅ STATE: SESSION_ACTIVE (Resuming with saved balance: {existing_balance})")
+        else:
+            # [ULTIMATE FALLBACK] We will always suggest the CURRENT, most up-to-date balance.
+            # The user is the final authority to confirm or correct this value.
+            current_balance = account_info.get('balance', 0.0)
+            SESSION_STATE.update({ "status": "READY_TO_START", "suggested_balance": current_balance })
+            print(f"-> STATE: READY_TO_START (Suggested current balance: {current_balance})")
 
-    # --- This logic now correctly checks for the daily balance for the unified context ---
-    existing_balance = supabase_handler.get_daily_opening_balance(portfolio_id, mt5_id_str, broker_date_str)
-    if existing_balance is not None:
-        SESSION_STATE.update({ "opening_balance": existing_balance, "status": "SESSION_ACTIVE" })
-        print(f"STATE: Record found. Starting session automatically with balance: {existing_balance}")
-    else:
-        SESSION_STATE.update({ "status": "READY_TO_START", "suggested_balance": account_info.get('balance', 0.0) })
-        print(f"STATE: New trading day for portfolio {portfolio_id}. Awaiting user confirmation.")
+    except Exception as e:
+        print(f"❌ CRITICAL ERROR during initialization: {e}"); traceback.print_exc(); SESSION_STATE["status"] = "ERROR_STATE"
 
 async def main():
     print("--- [VERSION: SYSTEM_INTEGRITY] Initializing Obsidian Core... ---")
-
     mt5_handler = MT5Handler()
-    if not mt5_handler.initialize_connection():
-        print("CRITICAL: MT5 connection failed. Server cannot start.")
-        return
-    
+    if not mt5_handler.initialize_connection(): return
     supabase_handler = HeadlessSupabaseHandler(url=settings.SUPABASE_URL, key=settings.SUPABASE_KEY)
-    if not supabase_handler.client:
-        print("CRITICAL: Supabase connection failed. Server cannot start.")
-        return
-
-    # Run the state initialization logic
+    if not supabase_handler.client: return
     await initialize_system_state(mt5_handler, supabase_handler)
-    
     print(f"--- System Initialized. Current Status: {SESSION_STATE.get('status')} ---")
-    
-    handler_with_deps = functools.partial(client_handler, mt5_handler=mt5_handler, supabase_handler=supabase_handler)
-    
-    server = await websockets.serve(handler_with_deps, WEBSOCKET_HOST, WEBSOCKET_PORT)
-    broadcast_task = asyncio.create_task(fetch_and_broadcast_data(mt5_handler, supabase_handler))
-    
-    print(f"WebSocket Server started at ws://{WEBSOCKET_HOST}:{WEBSOCKET_PORT}")
-    
-    await SHUTDOWN_EVENT.wait() # Keep server running indefinitely
+    server = await websockets.serve(functools.partial(client_handler, mt5_handler=mt5_handler, supabase_handler=supabase_handler), WEBSOCKET_HOST, WEBSOCKET_PORT)
+    await asyncio.create_task(fetch_and_broadcast_data(mt5_handler, supabase_handler))
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nServer shutdown requested by user.")
-    finally:
-        print("--- Server shutting down. ---")
+    try: asyncio.run(main())
+    except KeyboardInterrupt: print("\nServer shutdown.")

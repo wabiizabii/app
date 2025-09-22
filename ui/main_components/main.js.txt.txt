@@ -49,7 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let lastCalculation = {};
     let animationTimeout = null;
     let displayMode = 'DOLLAR';
-    
+    let isUserEditingBalance = false;
     const socket = new WebSocket('ws://localhost:5555');
 
     socket.onopen = () => { if (selectors.hudStatusIndicator) { selectors.hudStatusIndicator.textContent = '● Connected'; selectors.hudStatusIndicator.style.color = 'var(--color-success)'; } };
@@ -60,18 +60,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // ACTION: REPLACE THE ENTIRE 'socket.onmessage' FUNCTION
     // IN YOUR main.js FILE
 
+    // แทนที่ฟังก์ชัน socket.onmessage เดิมทั้งหมดด้วยโค้ดนี้
+
     socket.onmessage = (event) => {
         const serverData = JSON.parse(event.data);
-        if (window.PhoenixModule && typeof window.PhoenixModule.receiveData === 'function') {
-        window.PhoenixModule.receiveData(serverData);
-        }
-        console.log("STATUS FROM BACKEND:", serverData.status);
         AppState = { ...AppState, ...serverData }; // Update global state
+
+        // [THE FIX] Call Phoenix Module early to ensure it always has the latest data
+        if (window.PhoenixModule && typeof window.PhoenixModule.receiveData === 'function') {
+            window.PhoenixModule.receiveData(serverData);
+        }
 
         const showIgnition = (contentToShow) => {
             ignitionModule.style.display = 'flex';
             selectors.cockpitContainer.classList.add('hidden');
-            // A helper to show only one content card at a time
             ['ignition-content-timezone', 'ignition-content-balance'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = (id === contentToShow) ? 'block' : 'none';
@@ -83,38 +85,62 @@ document.addEventListener('DOMContentLoaded', () => {
             selectors.cockpitContainer.classList.remove('hidden');
         };
 
-        // --- [THE AUTO-IGNITION UI LOGIC] ---
         switch (serverData.status) {
-            case "REQUIRE_TIMEZONE_CONFIRMATION":
-                showIgnition('ignition-content-timezone');
-                // ... (rest of the timezone logic)
-                break;
-
-            case "READY_TO_START":
-                showIgnition('ignition-content-balance');
-                openingBalanceInput.value = (serverData.suggested_balance || 0).toFixed(2);
-                startTradingBtn.disabled = false;
-                startTradingBtn.textContent = "START TRADING DAY";
-                break;
-
-            // This is the new, smart case
-            case "SESSION_ALREADY_ACTIVE":
             case "SESSION_ACTIVE":
                 showCockpit();
                 updateFullDashboard(serverData);
                 break;
 
+            case "READY_TO_START":
+                showIgnition('ignition-content-balance');
+                
+                // [THE FIX] The system will only update the balance if the user is NOT typing in the input box.
+                if (!isUserEditingBalance) {
+                    openingBalanceInput.value = (serverData.suggested_balance || 0).toFixed(2);
+                }
+                
+                startTradingBtn.disabled = false;
+                startTradingBtn.textContent = "START TRADING DAY";
+                break;
+
+           case "REQUIRE_TIMEZONE_CONFIRMATION":
+                showIgnition('ignition-content-timezone');
+                
+                // [THE FIX] Populate the broker name and timezone options
+                if (detectedBrokerName) {
+                    detectedBrokerName.textContent = `Please confirm the timezone for broker: "${serverData.broker_name}"`;
+                }
+
+                if (timezoneOffsetSelect) {
+                    timezoneOffsetSelect.innerHTML = ''; // Clear old options
+                    // Generate options from GMT-12 to GMT+14
+                    for (let i = -12; i <= 14; i++) {
+                        const option = document.createElement('option');
+                        const sign = i >= 0 ? '+' : '';
+                        option.value = i;
+                        option.textContent = `GMT${sign}${i}`;
+                        // Suggest a default value, e.g., GMT+3
+                        if (i === (serverData.suggested_offset || 3)) {
+                            option.selected = true;
+                        }
+                        timezoneOffsetSelect.appendChild(option);
+                    }
+            }
+            break;
+
             case "ERROR_STATE":
+                // [NEW] Handle critical backend errors
                 alert(`[Backend Error] ${serverData.error.title}: ${serverData.error.message}`);
+                // Force show a generic ignition screen to prevent a blank page
+                showIgnition(null); 
                 break;
                 
             default:
-                // Default to showing the ignition screen if status is unknown
+                // Fallback for any unknown or initializing state
                 showIgnition(null);
                 break;
         }
     };
-    
 
     
     // SECTION 3.2: FORMATTER HUB
@@ -143,6 +169,21 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         formatPercentage: (value) => {
             return `${(value || 0).toFixed(2)}%`;
+        },
+        formatLocalTime: (isoString) => {
+            if (!isoString) return '';
+            const date = new Date(isoString);
+            // Using toLocaleString will automatically use the user's browser timezone and format.
+            // We can specify options for a consistent 24-hour format.
+            return date.toLocaleString(undefined, {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            }).replace(',', ''); // Remove comma often inserted between date and time
         }
     };
     // SECTION 4: UI RENDERING FUNCTIONS
@@ -282,29 +323,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // SECTION 4.2: UI HELPER FUNCTIONS
     function resetCalculator() { if (selectors.entryPriceInput) selectors.entryPriceInput.value = ''; if (selectors.stopLossInput) selectors.stopLossInput.value = ''; if (selectors.takeProfitInput) selectors.takeProfitInput.value = ''; if (selectors.lotSizeInput) selectors.lotSizeInput.value = '0.00'; if (selectors.potentialLossValue) selectors.potentialLossValue.textContent = '-$0.00'; if (selectors.potentialProfitValue) selectors.potentialProfitValue.textContent = '+$0.00'; if (selectors.rrRatioValue) selectors.rrRatioValue.textContent = '-'; if (selectors.armBtn) { selectors.armBtn.disabled = true; selectors.armBtn.classList.remove('standby-pulse'); } if (selectors.executeBtn) { selectors.executeBtn.disabled = true; selectors.executeBtn.classList.remove('urgent-pulse'); } lastCalculation = {}; }
     function renderTable(tbody, data, rowCreator, colspan, emptyMessage) { if (!tbody || !data) return; tbody.innerHTML = ''; if (data.length === 0) { tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center; color: var(--color-text-secondary);">${emptyMessage}</td></tr>`; return; } data.forEach(item => tbody.insertAdjacentHTML('beforeend', rowCreator(item))); }
-    function createOpenPositionRow(pos) { const profitColor = pos.Profit >= 0 ? 'text-profit' : 'text-loss'; const riskPercentText = pos.risk_percent ? `(${Formatter.formatPercentage(pos.risk_percent)})` : ''; return `<tr><td>${pos.Time || ''}</td><td>${pos.Symbol}</td><td>${pos.Type}</td><td>${pos.Volume}</td><td>${pos.Price}</td><td>${pos.SL || ''}</td><td>${pos.TP || ''}</td><td class="text-loss">${Formatter.formatCurrency(pos.position_risk)} ${riskPercentText}</td><td>${(pos.position_rr || 0).toFixed(2)}</td><td class="${profitColor}">${Formatter.formatCurrency(pos.Profit)}</td><td><button class="btn-close-pos" data-ticket="${pos.Ticket}">Close</button></td></tr>`; }
-    function createPendingOrderRow(order) { return `<tr><td>${order.Time || ''}</td><td>${order.Symbol}</td><td>${order.Type}</td><td>${order.Volume}</td><td>${order.Price}</td><td>${order.SL || ''}</td><td>${order.TP || ''}</td><td class="text-loss">${Formatter.formatCurrency(order.position_risk)}</td><td><button class="btn-close-pos" data-ticket="${order.Ticket}">Cancel</button></td></tr>`; }
-    function createTradeHistoryRow(trade) {
-        const netProfit = trade['Net P/L'] || 0;
-        const profitColor = netProfit >= 0 ? 'text-profit' : 'text-loss';
-        return `<tr>
-            <td>${trade['Close Time'] || ''}</td>
-            <td>${trade.Symbol || ''}</td>
-            <td>${trade.Type || ''}</td>
-            <td>${trade.Volume.toFixed(2) || 0}</td>
-            <td>${Formatter.formatCurrency(trade['Gross P/L'])}</td>
-            <td class="text-loss">${Formatter.formatCurrency(trade.Costs)}</td>
-            <td class="${profitColor}">${Formatter.formatCurrency(netProfit)}</td>
-        </tr>`;
-    }
+    function createOpenPositionRow(pos) { const profitColor = pos.Profit >= 0 ? 'text-profit' : 'text-loss'; const riskPercentText = pos.risk_percent ? `(${Formatter.formatPercentage(pos.risk_percent)})` : ''; return `<tr><td>${Formatter.formatLocalTime(pos.Time)}</td><td>${pos.Symbol}</td><td>${pos.Type}</td><td>${pos.Volume}</td><td>${pos.Price}</td><td>${pos.SL || ''}</td><td>${pos.TP || ''}</td><td class="text-loss">${Formatter.formatCurrency(pos.position_risk)} ${riskPercentText}</td><td>${(pos.position_rr || 0).toFixed(2)}</td><td class="${profitColor}">${Formatter.formatCurrency(pos.Profit)}</td><td><button class="btn-close-pos" data-ticket="${pos.Ticket}">Close</button></td></tr>`; }
+    function createPendingOrderRow(order) { return `<tr><td>${Formatter.formatLocalTime(order.Time)}</td><td>${order.Symbol}</td><td>${order.Type}</td><td>${order.Volume}</td><td>${order.Price}</td><td>${order.SL || ''}</td><td>${order.TP || ''}</td><td class="text-loss">${Formatter.formatCurrency(order.position_risk)}</td><td><button class="btn-close-pos" data-ticket="${order.Ticket}">Cancel</button></td></tr>`; }
+    function createTradeHistoryRow(trade) {const netProfit = trade['Net P/L'] || 0;const profitColor = netProfit >= 0 ? 'text-profit' : 'text-loss';return `<tr><td>${Formatter.formatLocalTime(trade['Close Time'])}</td><td>${trade.Symbol || ''}</td><td>${trade.Type || ''}</td><td>${trade.Volume.toFixed(2) || 0}</td><td>${Formatter.formatCurrency(trade['Gross P/L'])}</td><td class="text-loss">${Formatter.formatCurrency(trade.Costs)}</td><td class="${profitColor}">${Formatter.formatCurrency(netProfit)}</td></tr>`;}
     function renderTradingViewWidget(symbol) { if (!symbol) return; const container = document.getElementById("tradingview-widget-container"); if (!container) return; container.innerHTML = ''; let tvSymbol = ''; const cleanSymbol = symbol.replace(/_$/, ''); if (['XAUUSD', 'XAGUSD'].includes(cleanSymbol)) { tvSymbol = `OANDA:${cleanSymbol}`; } else if (cleanSymbol.includes('WTI') || cleanSymbol.includes('USOIL')) { tvSymbol = 'TVC:USOIL'; } else if (cleanSymbol.includes('BRN') || cleanSymbol.includes('UKOIL')) { tvSymbol = 'TVC:UKOIL'; } else if (cleanSymbol.includes('SP500') || cleanSymbol.includes('US500')) { tvSymbol = 'TVC:SPX'; } else if (cleanSymbol.includes('NQ100') || cleanSymbol.includes('US100')) { tvSymbol = 'TVC:NDX'; } else if (cleanSymbol.includes('DJI30') || cleanSymbol.includes('US30')) { tvSymbol = 'TVC:DJI'; } else if (['ETHUSD', 'BTCUSD'].includes(cleanSymbol)) { tvSymbol = `COINBASE:${cleanSymbol}`; } else { tvSymbol = `OANDA:${cleanSymbol}`; } console.log(`Broker Symbol: ${symbol} -> TradingView Symbol: ${tvSymbol}`); try { tradingViewWidget = new TradingView.widget({ "container_id": "tradingview-widget-container", "autosize": true, "symbol": tvSymbol, "interval": "15", "timezone": "Etc/UTC", "theme": "dark", "style": "1", "locale": "en", "enable_publishing": false, "hide_side_toolbar": false, "details": true, "studies": ["MASimple@tv-basicstudies"] }); } catch (e) { console.error("TradingView Widget Error:", e); container.innerHTML = "Failed to load TradingView Widget."; } }
-    
-    
-    // FILE: main.js
-    // ACTION: REPLACE THE ENTIRE initSymbolSelect FUNCTION (HARD RESET PROTOCOL)
-
-    // FILE: main.js
-    // ACTION: REPLACE THE ENTIRE initSymbolSelect FUNCTION
 
     function initSymbolSelect(symbols) {
         if (!selectors.symbolSelect) return;
@@ -427,83 +449,63 @@ document.addEventListener('DOMContentLoaded', () => {
     // ACTION: REPLACE THE ENTIRE attachEventListeners FUNCTION
 
     function attachEventListeners() {
+        // --- [IGNITION CONTROL UPGRADE] ---
+        // เพิ่ม 2 Event Listeners ใหม่นี้เข้าไป
+        openingBalanceInput?.addEventListener('focus', () => {
+            isUserEditingBalance = true;
+            console.log("ผู้ใช้เริ่มแก้ไข: หยุดการอัปเดต Balance ชั่วคราว");
+        });
+
+        openingBalanceInput?.addEventListener('blur', () => {
+            isUserEditingBalance = false;
+            console.log("ผู้ใช้แก้ไขเสร็จสิ้น: กลับมาอัปเดต Balance ต่อ (ถ้าเซสชันยังไม่เริ่ม)");
+        });
+        // --- [END OF UPGRADE] ---
+
         document.querySelector('.athena-tabs')?.addEventListener('click', (e) => {
-            // First, check if a valid tab button was clicked.
-            if (!e.target.matches('.athena-tab-btn')) return;
-
-            // [ THE SURGICAL INSERTION ] ---
-            // Immediately stop the event from bubbling up to the card header.
-            // นี่คือจุดที่แก้ไขครับ: คำสั่งนี้จะหยุดไม่ให้ event การคลิก tab วิ่งไปรบกวน header ที่ครอบอยู่
             e.stopPropagation();
-            // --- [ END OF INSERTION ] ---
-
-            // Now, proceed with the tab switching logic as normal.
             const targetPaneId = e.target.dataset.target;
-
+            if (!e.target.matches('.athena-tab-btn')) return;
             document.querySelectorAll('.athena-tab-btn').forEach(btn => btn.classList.remove('active'));
             e.target.classList.add('active');
-
             document.querySelectorAll('.athena-content-pane').forEach(pane => {
-                if (pane.id === targetPaneId) {
-                    pane.classList.add('active');
-                } else {
-                    pane.classList.remove('active');
-                }
+                pane.classList.toggle('active', pane.id === targetPaneId);
             });
         });
 
         // --- Mission Planner Calculation Logic ---
         selectors.mpCalculateBtn?.addEventListener('click', () => {
-            // 1. Read Inputs
             const balance = parseFloat(selectors.mpBalance.value) || 0;
             const profitTargetPercent = parseFloat(selectors.mpProfitTarget.value) || 0;
             const consistencyRulePercent = parseFloat(selectors.mpConsistencyRule.value) || 0;
             const rrRatio = parseFloat(selectors.mpRrRatio.value) || 1;
             const currentWins = parseInt(selectors.mpWins.value) || 0;
             const currentLosses = parseInt(selectors.mpLosses.value) || 0;
-
             if (balance === 0 || profitTargetPercent === 0) {
                 alert("Please enter a valid Balance and Profit Target.");
                 return;
             }
-
-            // 2. Calculate Strategic Parameters
             const profitTargetUSD = balance * (profitTargetPercent / 100);
             const consistencyCeilingUSD = profitTargetUSD * (consistencyRulePercent / 100);
-            
-            // Assuming 1 win per day for simplicity of calculation
-            const theoreticalProfitPerTrade = consistencyCeilingUSD; // Assuming 1 win/day
+            const theoreticalProfitPerTrade = consistencyCeilingUSD;
             const theoreticalRiskPerTrade = theoreticalProfitPerTrade / rrRatio;
-
-            // 2b. [ THE CRITICAL COMMAND ] Get the REAL tactical limit from the live data stream
             const tacticalRptLimit = AppState.rpt_limit_usd || 0;
-
-            // 2c. The TRUE Optimal Risk is the SMALLER of the two.
-            // แผนการจะต้องเคารพขีดจำกัดทางยุทธวิธีเสมอ
             const optimalRiskPerTrade = Math.min(theoreticalRiskPerTrade, tacticalRptLimit);
-
-            // 2d. Recalculate the corresponding profit based on the TRUE risk
             const optimalProfitPerTrade = optimalRiskPerTrade * rrRatio;
-
-            // 3. Calculate Progress
             const profitSoFar = (currentWins * optimalProfitPerTrade) - (currentLosses * optimalRiskPerTrade);
             const profitRemaining = profitTargetUSD - profitSoFar;
             const progressPercent = (profitSoFar / profitTargetUSD) * 100;
-
-            // 4. Calculate Path to Victory
             let winsNeeded = 0;
             if (profitRemaining > 0 && optimalProfitPerTrade > 0) {
                 winsNeeded = Math.ceil(profitRemaining / optimalProfitPerTrade);
             }
-
-            // 5. Render Outputs
             selectors.resultRiskUsd.textContent = Formatter.formatCurrency(optimalRiskPerTrade);
             selectors.resultProfitUsd.textContent = Formatter.formatCurrency(optimalProfitPerTrade);
             selectors.resultProgress.textContent = `${progressPercent.toFixed(1)}%`;
             selectors.resultWinsNeeded.textContent = winsNeeded;
-            
-            selectors.mpResultsContainer.style.display = 'flex'; // Show the results
+            selectors.mpResultsContainer.style.display = 'flex';
         });
+
         // Ignition Module Listeners
         confirmTimezoneBtn?.addEventListener('click', () => {
             const offset = timezoneOffsetSelect.value;
@@ -517,11 +519,18 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         startTradingBtn?.addEventListener('click', () => {
-            const balanceValue = openingBalanceInput.value;
-            if (balanceValue && !isNaN(parseFloat(balanceValue)) && parseFloat(balanceValue) > 0) {
+            if (!openingBalanceInput) return;
+
+            // [THE DEFINITIVE FIX] Sanitize the input value before parsing.
+            const rawBalanceValue = openingBalanceInput.value;
+            // This removes any character that is NOT a digit or a period (.).
+            const sanitizedBalanceValue = rawBalanceValue.replace(/[^0-9.]/g, '');
+            const finalBalance = parseFloat(sanitizedBalanceValue);
+
+            if (finalBalance && !isNaN(finalBalance) && finalBalance > 0) {
                 socket.send(JSON.stringify({ 
                     event: "START_SESSION", 
-                    payload: { openingBalance: parseFloat(balanceValue) } 
+                    payload: { openingBalance: finalBalance } 
                 }));
                 startTradingBtn.disabled = true;
                 startTradingBtn.textContent = "INITIALIZING...";
@@ -530,12 +539,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // [ เพิ่ม ] --- Risk Dial Event Listener ---
         selectors.riskDial?.addEventListener('change', (e) => {
             const newRiskPercent = parseFloat(e.target.value);
             console.log(`Risk Dial changed. Sending new value to backend: ${newRiskPercent}`);
-            
-            // ส่ง event กลับไปหา Backend เพื่อบันทึก
             socket.send(JSON.stringify({ 
                 event: "UPDATE_DDL_SETTING",
                 payload: { ddl_percent: newRiskPercent }
@@ -543,24 +549,71 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Your other listeners
-        selectors.calculateBtn?.addEventListener('click', () => { if (!selectors.tpslCheckbox.checked || !selectors.stopLossInput.value || parseFloat(selectors.stopLossInput.value) <= 0) { alert("Please check the TP/SL box and enter a valid Stop Loss price."); return; } const command = { event: "CALCULATE_LOT_REQUEST", payload: { symbol: selectors.symbolSelect.value, sl_price: parseFloat(selectors.stopLossInput.value) || 0, tp_price: parseFloat(selectors.takeProfitInput.value) || 0, order_type_str: selectors.orderTypeSelect.value, entry_price: parseFloat(selectors.entryPriceInput.value) || 0 } }; if (!command.payload.symbol) { alert("Please select a Symbol."); return; } socket.send(JSON.stringify(command)); });
+        selectors.calculateBtn?.addEventListener('click', () => {
+            if (!selectors.tpslCheckbox.checked || !selectors.stopLossInput.value || parseFloat(selectors.stopLossInput.value) <= 0) {
+                alert("Please check the TP/SL box and enter a valid Stop Loss price.");
+                return;
+            }
+            const command = { event: "CALCULATE_LOT_REQUEST", payload: { symbol: selectors.symbolSelect.value, sl_price: parseFloat(selectors.stopLossInput.value) || 0, tp_price: parseFloat(selectors.takeProfitInput.value) || 0, order_type_str: selectors.orderTypeSelect.value, entry_price: parseFloat(selectors.entryPriceInput.value) || 0 } };
+            if (!command.payload.symbol) {
+                alert("Please select a Symbol.");
+                return;
+            }
+            socket.send(JSON.stringify(command));
+        });
+
         selectors.lotSizeInput?.addEventListener('input', updateCalculationReadout);
-        selectors.armBtn?.addEventListener('click', () => { if (selectors.armBtn) { selectors.armBtn.classList.remove('standby-pulse'); selectors.armBtn.disabled = true; } if (selectors.executeBtn) { selectors.executeBtn.disabled = false; selectors.executeBtn.classList.add('urgent-pulse'); } });
-        selectors.executeBtn?.addEventListener('click', () => { const orderDetails = { type: selectors.orderTypeSelect.value, lot_size: parseFloat(selectors.lotSizeInput.value), symbol: selectors.symbolSelect.value, sl: parseFloat(selectors.stopLossInput.value) || 0, tp: parseFloat(selectors.takeProfitInput.value) || 0, entry_price: parseFloat(selectors.entryPriceInput.value) || 0 }; if (orderDetails.lot_size <= 0) { alert("Invalid Lot Size."); return; } socket.send(JSON.stringify({ event: "EXECUTE_TRADE", payload: orderDetails })); resetCalculator(); });
-        document.querySelectorAll('.tab-btn').forEach(button => { button.addEventListener('click', () => { document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active')); button.classList.add('active'); const category = button.dataset.value; const isMarket = category === 'MARKET'; if (selectors.entryPriceGroup) selectors.entryPriceGroup.classList.toggle('hidden', isMarket); if (selectors.orderTypeSelect) selectors.orderTypeSelect.value = isMarket ? 'MARKET_BUY' : (category === 'LIMIT' ? 'BUY_LIMIT' : 'BUY_STOP'); resetCalculator(); }); });
-        selectors.tpslCheckbox?.addEventListener('change', () => { document.querySelectorAll('.tpsl-group').forEach(g => g.style.display = selectors.tpslCheckbox.checked ? 'flex' : 'none'); resetCalculator(); });
+        selectors.armBtn?.addEventListener('click', () => {
+            if (selectors.armBtn) {
+                selectors.armBtn.classList.remove('standby-pulse');
+                selectors.armBtn.disabled = true;
+            }
+            if (selectors.executeBtn) {
+                selectors.executeBtn.disabled = false;
+                selectors.executeBtn.classList.add('urgent-pulse');
+            }
+        });
+
+        selectors.executeBtn?.addEventListener('click', () => {
+            const orderDetails = { type: selectors.orderTypeSelect.value, lot_size: parseFloat(selectors.lotSizeInput.value), symbol: selectors.symbolSelect.value, sl: parseFloat(selectors.stopLossInput.value) || 0, tp: parseFloat(selectors.takeProfitInput.value) || 0, entry_price: parseFloat(selectors.entryPriceInput.value) || 0 };
+            if (orderDetails.lot_size <= 0) {
+                alert("Invalid Lot Size.");
+                return;
+            }
+            socket.send(JSON.stringify({ event: "EXECUTE_TRADE", payload: orderDetails }));
+            resetCalculator();
+        });
+
+        document.querySelectorAll('.tab-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                const category = button.dataset.value;
+                const isMarket = category === 'MARKET';
+                if (selectors.entryPriceGroup) selectors.entryPriceGroup.classList.toggle('hidden', isMarket);
+                if (selectors.orderTypeSelect) selectors.orderTypeSelect.value = isMarket ? 'MARKET_BUY' : (category === 'LIMIT' ? 'BUY_LIMIT' : 'BUY_STOP');
+                resetCalculator();
+            });
+        });
+
+        selectors.tpslCheckbox?.addEventListener('change', () => {
+            document.querySelectorAll('.tpsl-group').forEach(g => g.style.display = selectors.tpslCheckbox.checked ? 'flex' : 'none');
+            resetCalculator();
+        });
         
-        // --- [IMPORTANT] These listeners connect the card headers to the NEW layoutManager ---
         if (selectors.battlePlannerCard) selectors.battlePlannerCard.querySelector('.card-header').addEventListener('click', () => layoutManager.togglePanel(selectors.battlePlannerCol, 'bp-collapsed', selectors.splitter1));
         if (selectors.analysisExpander) selectors.analysisExpander.querySelector('.card-header').addEventListener('click', () => layoutManager.togglePanel(selectors.analysisCol, 'an-collapsed', selectors.splitter2));
         
-        // --- [REMOVED] The old, separate flyout tab listeners are no longer needed here. ---
-        // The new layoutManager.init() now handles them centrally for better control.
-        // if (selectors.bpFlyoutTab) selectors.bpFlyoutTab.addEventListener('click', () => layoutManager.togglePanel(selectors.battlePlannerCol, 'bp-collapsed', selectors.splitter1));
-        // if (selectors.anFlyoutTab) selectors.anFlyoutTab.addEventListener('click', () => layoutManager.togglePanel(selectors.analysisCol, 'an-collapsed', selectors.splitter2));
-
         const hudCards = document.querySelectorAll('.hud-card');
-        hudCards.forEach(card => { card.addEventListener('click', (e) => { if (e.target.closest('#notification-area') || e.target.closest('.risk-dial')) return; displayMode = (displayMode === 'DOLLAR') ? 'R_UNIT' : 'DOLLAR'; if (AppState.status === "SESSION_ACTIVE") { updateFullDashboard(AppState); } }); });
+        hudCards.forEach(card => {
+            card.addEventListener('click', (e) => {
+                if (e.target.closest('#notification-area') || e.target.closest('.risk-dial')) return;
+                displayMode = (displayMode === 'DOLLAR') ? 'R_UNIT' : 'DOLLAR';
+                if (AppState.status === "SESSION_ACTIVE") {
+                    updateFullDashboard(AppState);
+                }
+            });
+        });
         
         document.querySelectorAll('.bottom-header-btn').forEach(tab => {
             tab.addEventListener('click', () => {

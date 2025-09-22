@@ -1,4 +1,4 @@
-# config/settings.py (เวอร์ชันจัดระเบียบใหม่และแก้ไขสมบูรณ์ พร้อม PortfolioDailyMetrics)
+# config/settings.py (เวอร์ชันสมบูรณ์ที่ผ่านการตรวจสอบสถาปัตยกรรม)
 """
 Central configuration file for the Ultimate Chart Trade Planner.
 """
@@ -7,19 +7,19 @@ Central configuration file for the Ultimate Chart Trade Planner.
 # I. SUPABASE CONFIGURATION
 # =========================================================================
 # --- Names of the Supabase Tables ---
-# (ชื่อตารางเหล่านี้ควรตรงกับชื่อตารางใน Supabase Dashboard ของคุณ)
 SUPABASE_TABLE_PORTFOLIOS = "Portfolios"
+SUPABASE_TABLE_PORTFOLIODAILYMETRICS = "PortfolioDailyMetrics"
+SUPABASE_TABLE_BROKERSETTINGS = "BrokerSettings" # <--- [FIX 3] เพิ่มตารางที่ขาดหายไป
 SUPABASE_TABLE_PLANNED_LOGS = "PlannedTradeLogs"
-SUPABASE_TABLE_ACTUAL_TRADES = "ActualTrades"  # For Deals from statements
-SUPABASE_TABLE_ACTUAL_ORDERS = "ActualOrders"  # For Orders from statements
-SUPABASE_TABLE_ACTUAL_POSITIONS = "ActualPositions" # For Positions from statements
+SUPABASE_TABLE_ACTUAL_TRADES = "ActualTrades"
+SUPABASE_TABLE_ACTUAL_ORDERS = "ActualOrders"
+SUPABASE_TABLE_ACTUAL_POSITIONS = "ActualPositions"
 SUPABASE_TABLE_STATEMENT_SUMMARIES = "StatementSummaries"
 SUPABASE_TABLE_UPLOAD_HISTORY = "UploadHistory"
 SUPABASE_TABLE_DEPOSIT_WITHDRAWAL_LOGS = "DepositWithdrawalLogs"
-SUPABASE_TABLE_PORTFOLIODAILYMETRICS = "PortfolioDailyMetrics" # <--- เพิ่มบรรทัดนี้เข้ามา
+
 
 # --- Expected Headers for each Table ---
-# ใช้สำหรับยืนยันโครงสร้างข้อมูลที่อ่านจาก CSV และเตรียมก่อนส่งเข้า Supabase
 WORKSHEET_HEADERS = {
 
     SUPABASE_TABLE_DEPOSIT_WITHDRAWAL_LOGS: [
@@ -28,9 +28,11 @@ WORKSHEET_HEADERS = {
     ],
 
     SUPABASE_TABLE_PORTFOLIOS: [
-        'PortfolioID', 'PortfolioName', 'ProgramType', 'EvaluationStep',
+        'PortfolioID', 'PortfolioName', 'BrokerName', # <--- [FIX 1A] เพิ่ม BrokerName
+        'ProgramType', 'EvaluationStep',
         'Status', 'InitialBalance', 'CreationDate', 'Notes',
         'ProfitTargetPercent', 'DailyLossLimitPercent', 'TotalStopoutPercent',
+        'ProfitConsistencyRulePercent', # <--- [FIX 1B] เพิ่ม ProfitConsistencyRulePercent
         'Leverage', 'MinTradingDays', 'CompetitionEndDate', 'CompetitionGoalMetric',
         'OverallProfitTarget', 'TargetEndDate', 'WeeklyProfitTarget',
         'DailyProfitTarget', 'MaxAcceptableDrawdownOverall', 'MaxAcceptableDrawdownDaily',
@@ -39,7 +41,16 @@ WORKSHEET_HEADERS = {
         'ScaleDown_MaxLossPercent', 'ScaleDown_LowWinRate',
         'ScaleDown_RiskDecrementPercent', 'MinRiskPercentAllowed',
         'MaxRiskPercentAllowed', 'CurrentRiskPercent', 'AccountID',
-        'AccountType', 'UserID', 'mt5_account_id' # เพิ่ม UserID และ mt5_account_id กลับมา
+        'AccountType', 'UserID', 'mt5_account_id'
+    ],
+    
+    SUPABASE_TABLE_PORTFOLIODAILYMETRICS: [
+        "MetricID", "PortfolioID", "mt5_account_id", # <--- [FIX 2] เพิ่ม mt5_account_id
+        "Date", "OpeningBalance", "OpeningEquity"
+    ],
+
+    SUPABASE_TABLE_BROKERSETTINGS: [ # <--- [FIX 3] เพิ่มโครงสร้างสำหรับตารางที่ขาดหายไป
+        "broker_name", "timezone_offset"
     ],
 
     SUPABASE_TABLE_PLANNED_LOGS: [
@@ -91,10 +102,6 @@ WORKSHEET_HEADERS = {
         "UploadTimestamp", "PortfolioID", "PortfolioName", "FileName", "FileSize",
         "FileHash", "Status", "ImportBatchID", "Notes"
     ],
-
-    SUPABASE_TABLE_PORTFOLIODAILYMETRICS: [ # <--- เพิ่มส่วนนี้เข้ามา
-        "MetricID", "PortfolioID", "Date", "OpeningBalance", "OpeningEquity"
-    ]
 }
 
 # --- Expected Raw Headers for parsing sections in CSV files ---

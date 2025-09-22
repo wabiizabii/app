@@ -8,6 +8,7 @@ import pytz
 from config import settings
 import math
 from collections import defaultdict
+import traceback
 
 class MT5Handler:
     def __init__(self):
@@ -39,7 +40,15 @@ class MT5Handler:
     def shutdown_connection(self):
         if self._is_connected: mt5.shutdown(); self._is_connected = False
 
-    def get_account_info(self): return mt5.account_info()._asdict() if self._is_connected and mt5.account_info() else None
+    def get_account_info(self):
+        if not self._is_connected: return None
+        account_info = mt5.account_info()
+        if not account_info: return None
+        
+        # Convert to dictionary and add the server info
+        info_dict = account_info._asdict()
+        info_dict['server_name'] = account_info.server  # This contains the real broker server name
+        return info_dict
 
     def get_all_symbol_properties(self):
         if not self._is_connected: return {}
@@ -81,7 +90,8 @@ class MT5Handler:
             return pd.DataFrame()
             
         df = pd.DataFrame(list(positions), columns=positions[0]._asdict().keys())
-        df['Time'] = pd.to_datetime(df['time'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%Y.%m.%d %H:%M:%S')        
+        if not df.empty:
+            df['Time'] = df['time'].apply(lambda x: pd.to_datetime(x, unit='s', utc=True).isoformat())
 
         # [ THE FIX ] --- This new logic no longer references 'commission' ---
         def calculate_risk_without_commission(position):
@@ -124,27 +134,34 @@ class MT5Handler:
         df['Type'] = df['type'].map(order_type_map)
         df = df[df['Type'].notna()]
         if df.empty: return pd.DataFrame()
-        df['Time'] = pd.to_datetime(df['time_setup'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%Y.%m.%d %H:%M:%S')
+        if not df.empty:
+            df['Time'] = df['time_setup'].apply(lambda x: pd.to_datetime(x, unit='s', utc=True).isoformat())
         df['position_risk'] = df.apply(lambda o: abs(mt5.order_calc_profit(mt5.ORDER_TYPE_SELL if o['type'] in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP] else mt5.ORDER_TYPE_BUY, o['symbol'], o['volume_initial'], o['price_open'], o['sl'])) if o['sl'] > 0 else 0.0, axis=1)
         df.rename(columns={'ticket': 'Ticket', 'symbol': 'Symbol', 'volume_initial': 'Volume', 'price_open': 'Price', 'sl': 'SL', 'tp': 'TP'}, inplace=True)
         return df[['Ticket', 'Time', 'Symbol', 'Type', 'Volume', 'Price', 'SL', 'TP', 'position_risk']]
 
+    # [THE DEFINITIVE FIX]
     def get_trade_history(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
         if not self._is_connected:
             return pd.DataFrame()
 
-        history_start = start_date - timedelta(days=30) 
-        all_deals = mt5.history_deals_get(history_start, end_date)
+        # [THE FIX] Convert datetime objects to Unix timestamps using the new, correct variable names.
+        from_timestamp = int(start_date.timestamp())
+        to_timestamp = int(end_date.timestamp())
+
+        history_start_ts = from_timestamp - (30 * 24 * 60 * 60)
+        
+        all_deals = mt5.history_deals_get(history_start_ts, to_timestamp)
         
         if all_deals is None or len(all_deals) == 0:
             return pd.DataFrame()
 
         deals_df = pd.DataFrame(list(all_deals), columns=all_deals[0]._asdict().keys())
-        deals_df['time_dt'] = pd.to_datetime(deals_df['time'], unit='s', utc=True)
-
+        
+        # Use the correct variable names for filtering as well.
         closing_deals_today = deals_df[
-            (deals_df['time_dt'] >= start_date) &
-            (deals_df['time_dt'] <= end_date) &
+            (deals_df['time'] >= from_timestamp) &
+            (deals_df['time'] <= to_timestamp) &
             (deals_df['entry'].isin([mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT]))
         ]
 
@@ -153,32 +170,26 @@ class MT5Handler:
         if len(closed_position_ids) == 0:
             return pd.DataFrame()
 
+        # The rest of the function logic remains the same.
         relevant_deals = deals_df[deals_df['position_id'].isin(closed_position_ids)].copy()
-
         opening_deals = relevant_deals[relevant_deals['entry'] == mt5.DEAL_ENTRY_IN].copy()
         opening_deals = opening_deals.loc[opening_deals.groupby('position_id')['time'].idxmin()]
-
         summary_agg = relevant_deals.groupby('position_id').agg(
-            Symbol=('symbol', 'first'),
-            Volume=('volume', 'first'),
-            Close_Time_Raw=('time', 'last'),
-            Gross_Profit=('profit', 'sum'),
-            Commission=('commission', 'sum'),
-            Swap=('swap', 'sum')
+            Symbol=('symbol', 'first'), Volume=('volume', 'first'),
+            Close_Time_Raw=('time', 'last'), Gross_Profit=('profit', 'sum'),
+            Commission=('commission', 'sum'), Swap=('swap', 'sum')
         ).reset_index()
-
         summary = pd.merge(summary_agg, opening_deals[['position_id', 'type']], on='position_id', how='left')
 
-        summary['Net P/L'] = summary['Gross_Profit'] + summary['Commission'] + summary['Swap']
-        summary['Type'] = summary['type'].map({mt5.ORDER_TYPE_BUY: 'Buy', mt5.ORDER_TYPE_SELL: 'Sell'})
-        summary['Close Time'] = pd.to_datetime(summary['Close_Time_Raw'], unit='s', utc=True).dt.tz_convert('Asia/Bangkok').dt.strftime('%Y.%m.%d %H:%M:%S')
-        # [CORRECTION] Costs should reflect all non-profit deductions
-        summary['Costs'] = summary['Commission'] + summary['Swap']
-        summary.rename(columns={'Gross_Profit': 'Gross P/L'}, inplace=True)
+        if not summary.empty:
+            summary['Net P/L'] = summary['Gross_Profit'] + summary['Commission'] + summary['Swap']
+            summary['Type'] = summary['type'].map({mt5.ORDER_TYPE_BUY: 'Buy', mt5.ORDER_TYPE_SELL: 'Sell'})
+            summary['Close Time'] = summary['Close_Time_Raw'].apply(lambda x: pd.to_datetime(x, unit='s', utc=True).isoformat())
+            summary['Costs'] = summary['Commission'] + summary['Swap']
+            summary.rename(columns={'Gross_Profit': 'Gross P/L'}, inplace=True)
+            return summary[['Close Time', 'Symbol', 'Type', 'Volume', 'Gross P/L', 'Costs', 'Net P/L']].sort_values(by='Close Time', ascending=True)
         
-        final_df = summary[['Close Time', 'Symbol', 'Type', 'Volume', 'Gross P/L', 'Costs', 'Net P/L']].sort_values(by='Close Time', ascending=True)
-
-        return final_df
+        return pd.DataFrame()
         
     def execute_trade(self, trade_details):
         try:
@@ -262,3 +273,44 @@ class MT5Handler:
         except Exception as e:
             print(f"ERROR calculating session start time: {e}. Falling back to current UTC day.")
             return datetime.now(pytz.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def get_balance_at_time(self, target_time_utc: datetime):
+        """
+        Finds the account balance from the deal history.
+        This version uses direct positional access to prevent KeyError.
+        """
+        if not self._is_connected: return None
+        
+        try:
+            deals = mt5.history_deals_get(target_time_utc - timedelta(days=3), target_time_utc)
+            
+            if deals is None or len(deals) == 0:
+                account_info = self.get_account_info()
+                return account_info.get('balance') if account_info else None
+
+            # Sort deals by time in descending order (most recent first) directly on the list of tuples
+            deals_sorted = sorted(deals, key=lambda d: d.time, reverse=True)
+
+            # Find the first deal that occurred at or before the target time
+            last_deal_tuple = None
+            target_timestamp = int(target_time_utc.timestamp())
+
+            for deal in deals_sorted:
+                if deal.time <= target_timestamp:
+                    last_deal_tuple = deal
+                    break # Found the latest deal we need
+
+            if last_deal_tuple:
+                # [THE DEFINITIVE FIX]
+                # Access the 'balance' field directly from the namedtuple.
+                # This completely bypasses pandas DataFrame and potential column name issues.
+                return last_deal_tuple.balance
+            else:
+                # No deals found before the session start time, fallback to current balance
+                account_info = self.get_account_info()
+                return account_info.get('balance') if account_info else None
+
+        except Exception as e:
+            print(f"   - ERROR in get_balance_at_time: {e}")
+            traceback.print_exc()
+            return None

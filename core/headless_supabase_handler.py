@@ -5,6 +5,7 @@ import pandas as pd
 from supabase import create_client, Client
 from datetime import datetime, timezone
 import uuid
+import traceback
 
 class HeadlessSupabaseHandler:
     def __init__(self, url: str, key: str):
@@ -74,32 +75,40 @@ class HeadlessSupabaseHandler:
             return False, str(e)
 
     # --- [RESTORED] BROKER & SESSION OPERATIONS ---
-
+        
     def get_daily_opening_balance(self, portfolio_id: str, mt5_account_id: str, broker_date_str: str):
         if not self.client: return None
         try:
             response = self.client.table("PortfolioDailyMetrics").select("OpeningBalance").eq("PortfolioID", portfolio_id).eq("mt5_account_id", str(mt5_account_id)).eq("Date", broker_date_str).single().execute()
             if response.data:
                 balance = response.data.get('OpeningBalance')
-                print(f"INFO (HEADLESS): Found existing opening balance in DB: {balance} for {broker_date_str}")
+                print(f"INFO (HEADLESS): Found existing opening balance in DB: {balance}")
                 return balance
             return None
         except Exception as e:
-            if "0 rows" not in str(e):
-                 print(f"ERROR (HEADLESS) in get_daily_opening_balance: {e}")
+            if "0 rows" not in str(e): print(f"ERROR (HEADLESS) in get_daily_opening_balance: {e}")
             return None
 
     def set_daily_opening_balance(self, portfolio_id: str, mt5_account_id: str, opening_balance: float, broker_date_str: str):
         if not self.client: return False
         try:
-            record = { "PortfolioID": portfolio_id, "Date": broker_date_str, "OpeningBalance": opening_balance, "mt5_account_id": str(mt5_account_id) }
-            self.client.table("PortfolioDailyMetrics").upsert(record, on_conflict='PortfolioID, Date').execute()
+            # This record now perfectly matches the new, correct database schema.
+            record = {
+                "PortfolioID": portfolio_id,
+                "mt5_account_id": str(mt5_account_id),
+                "Date": broker_date_str,
+                "OpeningBalance": opening_balance,
+                "OpeningEquity": opening_balance
+            }
+            # We use 'insert' to let the database handle the auto-incrementing 'MetricID'.
+            self.client.table("PortfolioDailyMetrics").insert(record).execute()
             print(f"SUCCESS (HEADLESS): Set opening balance for {broker_date_str} to {opening_balance}")
             return True
         except Exception as e:
             print(f"ERROR (HEADLESS) in set_daily_opening_balance: {e}")
+            traceback.print_exc()
             return False
-        
+
     def get_broker_timezone(self, broker_name):
         if not self.client: return None
         try:
@@ -109,15 +118,18 @@ class HeadlessSupabaseHandler:
             return None
 
     def set_broker_timezone(self, broker_name, offset):
+        """บันทึก timezone offset สำหรับโบรกเก-อร์ใหม่"""
         if not self.client: return False
         try:
+            # โค้ดนี้ถูกต้องแล้ว และจะทำงานได้เมื่อ Schema ถูกต้อง
             data_to_insert = {'broker_name': broker_name, 'timezone_offset': offset}
             self.client.table('BrokerSettings').upsert(data_to_insert, on_conflict='broker_name').execute()
+            print(f"SUCCESS (HEADLESS): Set timezone for broker '{broker_name}' to {offset}")
             return True
         except Exception as e:
             print(f"Error saving broker timezone setting: {e}")
             return False
-            
+                
     # --- [RESTORED] DATA INGESTION OPERATIONS ---
 
     def _save_bulk_data(self, table_name: str, records: list):

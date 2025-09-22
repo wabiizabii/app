@@ -1,7 +1,37 @@
 // ==============================================================================
-// FILE: main.js (VERSION: USER-IN-CONTROL FIX)
+// FILE: main.js (VERSION: DATA_CONTRACT_ENFORCED)
 // ==============================================================================
 
+// [THE DATA CONTRACT] This object is the single source of truth for payload keys.
+// It MUST be kept in sync with 'shared/data_contracts.py'.
+const PAYLOAD_KEYS = {
+    STATUS: "status",
+    SUGGESTED_BALANCE: "suggested_balance",
+    BROKER_NAME: "broker_name",
+    SUGGESTED_OFFSET: "suggested_offset",
+    ERROR: "error",
+    EVENTS: "events",
+    EQUITY: "equity",
+    OPENING_BALANCE: "opening_balance",
+    DAILY_PL_TOTAL_USD: "daily_pl_total_usd",
+    DAILY_PL_TOTAL_PERCENT: "daily_pl_total_percent",
+    REALIZED_PL: "realized_pl",
+    UNREALIZED_PL: "open_positions_total_profit",
+    PL_TARGET: "pl_target",
+    DDL_LIMIT_USD: "ddl_limit_usd",
+    DDL_USED_USD: "ddl_used_usd",
+    DDL_LEFT_USD: "ddl_left_usd",
+    RPT_LIMIT_USD: "rpt_limit_usd",
+    RPT_AVAILABLE_USD: "rpt_available_usd",
+    PROFIT_CONSISTENCY_PERCENT: "profit_consistency_percent",
+    HIGHEST_PROFIT_DAY: "highest_profit_day",
+    OPEN_POSITIONS: "open_positions",
+    PENDING_ORDERS: "pending_orders",
+    TRADE_HISTORY: "trade_history",
+    ALL_SYMBOLS: "all_symbols",
+    PORTFOLIO_CONTEXT: "portfolio_context",
+    MT5_ACCOUNT_ID: "mt5_account_id"
+};
 document.addEventListener('DOMContentLoaded', () => {
 
     // SECTION 1: INJECT TEMPLATES
@@ -60,18 +90,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // ACTION: REPLACE THE ENTIRE 'socket.onmessage' FUNCTION
     // IN YOUR main.js FILE
 
+    // แทนที่ฟังก์ชัน socket.onmessage เดิมทั้งหมดด้วยโค้ดนี้
+    function updatePortfolioInfo(data) {
+        const portfolioContext = data[PAYLOAD_KEYS.PORTFOLIO_CONTEXT];
+        if (selectors.portfolioNameDisplay) selectors.portfolioNameDisplay.textContent = portfolioContext?.PortfolioName || 'N/A';
+        if (selectors.mt5AccountDisplay) selectors.mt5AccountDisplay.textContent = data[PAYLOAD_KEYS.MT5_ACCOUNT_ID] || 'N/A';
+    }
+
     socket.onmessage = (event) => {
         const serverData = JSON.parse(event.data);
+        AppState = { ...AppState, ...serverData };
+
         if (window.PhoenixModule && typeof window.PhoenixModule.receiveData === 'function') {
-        window.PhoenixModule.receiveData(serverData);
+            window.PhoenixModule.receiveData(serverData);
         }
-        console.log("STATUS FROM BACKEND:", serverData.status);
-        AppState = { ...AppState, ...serverData }; // Update global state
 
         const showIgnition = (contentToShow) => {
             ignitionModule.style.display = 'flex';
             selectors.cockpitContainer.classList.add('hidden');
-            // A helper to show only one content card at a time
             ['ignition-content-timezone', 'ignition-content-balance'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = (id === contentToShow) ? 'block' : 'none';
@@ -83,47 +119,49 @@ document.addEventListener('DOMContentLoaded', () => {
             selectors.cockpitContainer.classList.remove('hidden');
         };
 
-        // --- [ตรรกะการแสดงผล UI อัตโนมัติ] ---
-        switch (serverData.status) {
-            case "REQUIRE_TIMEZONE_CONFIRMATION":
-                showIgnition('ignition-content-timezone');
-                // ... (ส่วนของตรรกะ timezone ยังคงเดิม)
-                break;
-
-            case "READY_TO_START":
-                showIgnition('ignition-content-balance');
-                
-                // --- [IGNITION CONTROL UPGRADE] ---
-                // นี่คือหัวใจของการแก้ไข:
-                // ระบบจะอัปเดตค่า Balance ก็ต่อเมื่อคุณ "ไม่ได้" กำลังพิมพ์อยู่ในช่องนั้น
-                if (!isUserEditingBalance) {
-                    openingBalanceInput.value = (serverData.suggested_balance || 0).toFixed(2);
-                }
-                // --- [END OF UPGRADE] ---
-
-                startTradingBtn.disabled = false;
-                startTradingBtn.textContent = "START TRADING DAY";
-                break;
-
-            case "SESSION_ALREADY_ACTIVE":
+        switch (serverData[PAYLOAD_KEYS.STATUS]) {
             case "SESSION_ACTIVE":
                 showCockpit();
                 updateFullDashboard(serverData);
                 break;
-
-            case "ERROR_STATE":
-                alert(`[Backend Error] ${serverData.error.title}: ${serverData.error.message}`);
+            case "READY_TO_START":
+                showIgnition('ignition-content-balance');
+                if (!isUserEditingBalance) {
+                    openingBalanceInput.value = (serverData[PAYLOAD_KEYS.SUGGESTED_BALANCE] || 0).toFixed(2);
+                }
+                startTradingBtn.disabled = false;
+                startTradingBtn.textContent = "START TRADING DAY";
                 break;
-                
+            case "REQUIRE_TIMEZONE_CONFIRMATION":
+                showIgnition('ignition-content-timezone');
+                const brokerNameDisplay = document.getElementById('broker-confirmation-text');
+                if (brokerNameDisplay && serverData[PAYLOAD_KEYS.BROKER_NAME]) {
+                    brokerNameDisplay.textContent = `Please confirm the timezone for: "${serverData[PAYLOAD_KEYS.BROKER_NAME]}"`;
+                }
+                if (timezoneOffsetSelect) {
+                    timezoneOffsetSelect.innerHTML = '';
+                    for (let i = -12; i <= 14; i++) {
+                        const option = document.createElement('option');
+                        const sign = i >= 0 ? '+' : '';
+                        option.value = i;
+                        option.textContent = `GMT${sign}${i}`;
+                        if (i === (serverData[PAYLOAD_KEYS.SUGGESTED_OFFSET] || 3)) {
+                            option.selected = true;
+                        }
+                        timezoneOffsetSelect.appendChild(option);
+                    }
+                }
+                break;
+            case "ERROR_STATE":
+                alert(`[Backend Error] ${serverData[PAYLOAD_KEYS.ERROR].title}: ${serverData[PAYLOAD_KEYS.ERROR].message}`);
+                showIgnition(null); 
+                break;
             default:
-                // หากสถานะไม่ชัดเจน ให้แสดงหน้าจอเริ่มต้นเสมอ
                 showIgnition(null);
                 break;
         }
     };
-    
 
-    
     // SECTION 3.2: FORMATTER HUB
     const Formatter = {
         formatCurrency: (value) => {
@@ -150,12 +188,39 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         formatPercentage: (value) => {
             return `${(value || 0).toFixed(2)}%`;
+        },
+        formatLocalTime: (isoString) => {
+            if (!isoString) return '';
+            const date = new Date(isoString);
+            // Using toLocaleString will automatically use the user's browser timezone and format.
+            // We can specify options for a consistent 24-hour format.
+            return date.toLocaleString(undefined, {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            }).replace(',', ''); // Remove comma often inserted between date and time
         }
     };
     // SECTION 4: UI RENDERING FUNCTIONS
+    function updateConsistencyGauge(data) {
+        const consistencyTooltip = document.getElementById('consistency-tooltip');
+        // Guard clause: If the element doesn't exist, stop the function.
+        if (!consistencyTooltip) return;
+
+        const percent = data[PAYLOAD_KEYS.PROFIT_CONSISTENCY_PERCENT] || 0;
+        const clampedPercent = Math.max(0, Math.min(100, percent));
+
+        consistencyTooltip.textContent = `${clampedPercent.toFixed(0)}%`;
+        consistencyTooltip.style.left = `${clampedPercent}%`;
+    }
+    
     function updateFullDashboard(data) {
-        if (selectors.symbolSelect && selectors.symbolSelect.options.length <= 1 && data.all_symbols) {
-            initSymbolSelect(data.all_symbols);
+        if (selectors.symbolSelect && selectors.symbolSelect.options.length <= 1 && data[PAYLOAD_KEYS.ALL_SYMBOLS]) {
+            initSymbolSelect(data[PAYLOAD_KEYS.ALL_SYMBOLS]);
         }
         updatePortfolioInfo(data);
         updateHud(data);
@@ -163,103 +228,55 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTablesAndFooters(data);
     }
 
-    function updateConsistencyGauge(data) {
-        // ตรวจสอบความปลอดภัย: ถ้าไม่มี selector นี้ ให้หยุดทำงาน
-        if (!selectors.consistencyTooltip) return;
-
-        // ดึงค่า % จากข้อมูลที่ Backend ส่งมา
-        const percent = data.profit_consistency_percent || 0;
-
-        // จำกัดค่าให้อยู่ระหว่าง 0 ถึง 100 เสมอ เพื่อป้องกันข้อผิดพลาด
-        const clampedPercent = Math.max(0, Math.min(100, percent));
-
-        // 1. อัปเดตข้อความใน Tooltip
-        selectors.consistencyTooltip.textContent = `${clampedPercent.toFixed(0)}%`;
-
-        // 2. ย้ายตำแหน่งของ Tooltip ไปตามค่า %
-        selectors.consistencyTooltip.style.left = `${clampedPercent}%`;
-    }
-
-    function updatePortfolioInfo(data) {
-        if (selectors.portfolioNameDisplay) selectors.portfolioNameDisplay.textContent = data.portfolio_context?.PortfolioName || 'N/A';
-        if (selectors.mt5AccountDisplay) selectors.mt5AccountDisplay.textContent = data.mt5_account_id || 'N/A';
-    }
-
     function updateHud(data) {
-        if (selectors.riskDial && data.ddl_percent_setting) {
-            selectors.riskDial.value = data.ddl_percent_setting;
-        }
         const profitColor = 'var(--color-success)', lossColor = 'var(--color-danger)';
         
-        // --- Live Equity Card (Displays TOTAL P/L) ---
         if (selectors.liveEquityValue) { 
-            selectors.liveEquityValue.textContent = Formatter.formatCurrency(data.equity); 
-            selectors.liveEquityValue.style.color = data.daily_pl_total_usd >= 0 ? profitColor : lossColor;
+            selectors.liveEquityValue.textContent = Formatter.formatCurrency(data[PAYLOAD_KEYS.EQUITY]); 
+            selectors.liveEquityValue.style.color = data[PAYLOAD_KEYS.DAILY_PL_TOTAL_USD] >= 0 ? profitColor : lossColor;
         }
         if (selectors.dailyPlNumbers) { 
-            selectors.dailyPlNumbers.textContent = `${Formatter.formatCurrency(data.daily_pl_total_usd)} (${Formatter.formatPercentage(data.daily_pl_total_percent)})`; 
-            selectors.dailyPlNumbers.style.color = data.daily_pl_total_usd >= 0 ? profitColor : lossColor; 
+            selectors.dailyPlNumbers.textContent = `${Formatter.formatCurrency(data[PAYLOAD_KEYS.DAILY_PL_TOTAL_USD])} (${Formatter.formatPercentage(data[PAYLOAD_KEYS.DAILY_PL_TOTAL_PERCENT])})`; 
+            selectors.dailyPlNumbers.style.color = data[PAYLOAD_KEYS.DAILY_PL_TOTAL_USD] >= 0 ? profitColor : lossColor; 
         }
-        // Asymmetrical Progress Bar for Live Equity
-        if (selectors.plToTargetBar) {
-            const totalPl = data.daily_pl_total_usd;
-            const maxLoss = data.ddl_limit_usd;
-            const target = data.pl_target;
-            const totalRange = maxLoss + target;
-            const zeroPointPercent = (maxLoss / totalRange) * 100;
-            let progressBarWidth = zeroPointPercent;
-            if (totalPl > 0 && totalRange > 0) {
-                const profitPercentOfRange = (totalPl / totalRange) * 100;
-                progressBarWidth = zeroPointPercent + profitPercentOfRange;
-            } else if (totalPl < 0 && totalRange > 0) {
-                const lossPercentOfRange = (Math.abs(totalPl) / totalRange) * 100;
-                progressBarWidth = zeroPointPercent - lossPercentOfRange;
-            }
-            progressBarWidth = Math.max(0, Math.min(100, progressBarWidth));
-            selectors.plToTargetBar.style.width = `${progressBarWidth}%`;
-        }
-
-        // --- Daily Risk Card ---
-        if (selectors.riskAvailableText) { selectors.riskAvailableText.textContent = `Limit: ${Formatter.formatCurrency(data.ddl_limit_usd)}`; }
-        const riskUsedPercent = data.ddl_limit_usd > 0 ? (data.ddl_used_usd / data.ddl_limit_usd) * 100 : 0;
-        if (selectors.riskUsedDisplay) { selectors.riskUsedDisplay.textContent = `Used: ${Formatter.formatCurrency(data.ddl_used_usd)} (${Formatter.formatPercentage(riskUsedPercent)})`; }
+        
+        if (selectors.riskAvailableText) { selectors.riskAvailableText.textContent = `Limit: ${Formatter.formatCurrency(data[PAYLOAD_KEYS.DDL_LIMIT_USD])}`; }
+        const riskUsedPercent = data[PAYLOAD_KEYS.DDL_LIMIT_USD] > 0 ? (data[PAYLOAD_KEYS.DDL_USED_USD] / data[PAYLOAD_KEYS.DDL_LIMIT_USD]) * 100 : 0;
+        if (selectors.riskUsedDisplay) { selectors.riskUsedDisplay.textContent = `Used: ${Formatter.formatCurrency(data[PAYLOAD_KEYS.DDL_USED_USD])} (${Formatter.formatPercentage(riskUsedPercent)})`; }
         if (selectors.riskProgressBar) { selectors.riskProgressBar.style.width = `${Math.min(riskUsedPercent, 100)}%`; }
         if (selectors.riskLeftValue) {
-            if (data.ddl_left_usd <= 0) {
+            if (data[PAYLOAD_KEYS.DDL_LEFT_USD] <= 0) {
                 selectors.riskLeftValue.textContent = "LIMIT REACHED";
                 selectors.riskLeftValue.style.color = lossColor;
-                if (selectors.calculateBtn) selectors.calculateBtn.disabled = true;
             } else {
-                selectors.riskLeftValue.textContent = Formatter.formatCurrency(data.ddl_left_usd);
+                selectors.riskLeftValue.textContent = Formatter.formatCurrency(data[PAYLOAD_KEYS.DDL_LEFT_USD]);
                 selectors.riskLeftValue.style.color = 'inherit';
-                if (selectors.calculateBtn) selectors.calculateBtn.disabled = false;
             }
         }
         
-        // --- Session P/L Card (Displays REALIZED P/L) ---
-        if (selectors.openingBalanceDisplay) { selectors.openingBalanceDisplay.textContent = `Balance: ${Formatter.formatCurrency(data.opening_balance)}`; }
+        if (selectors.openingBalanceDisplay) { selectors.openingBalanceDisplay.textContent = `Balance: ${Formatter.formatCurrency(data[PAYLOAD_KEYS.OPENING_BALANCE])}`; }
         if (selectors.sessionPlValue) { 
-            selectors.sessionPlValue.textContent = Formatter.formatCurrency(data.history_total_profit); 
-            selectors.sessionPlValue.style.color = data.history_total_profit >= 0 ? profitColor : lossColor; 
+            selectors.sessionPlValue.textContent = Formatter.formatCurrency(data[PAYLOAD_KEYS.REALIZED_PL]); 
+            selectors.sessionPlValue.style.color = data[PAYLOAD_KEYS.REALIZED_PL] >= 0 ? profitColor : lossColor; 
         }
-        if (selectors.plTargetValue) { selectors.plTargetValue.textContent = `/ Target: ${Formatter.formatCurrency(data.pl_target)}`; }
+        if (selectors.plTargetValue) { selectors.plTargetValue.textContent = `/ Target: ${Formatter.formatCurrency(data[PAYLOAD_KEYS.PL_TARGET])}`; }
         
-        const plPercentOfTarget = data.pl_target > 0 ? (data.history_total_profit / data.pl_target) * 100 : 0;
+        const plPercentOfTarget = data[PAYLOAD_KEYS.PL_TARGET] > 0 ? (data[PAYLOAD_KEYS.REALIZED_PL] / data[PAYLOAD_KEYS.PL_TARGET]) * 100 : 0;
         if (selectors.sessionPlProgressBar) { selectors.sessionPlProgressBar.style.width = `${Math.min(Math.max(plPercentOfTarget, 0), 100)}%`; }
         if (selectors.sessionPlPercent) { selectors.sessionPlPercent.textContent = Formatter.formatPercentage(plPercentOfTarget); }
 
-        if (selectors.rptLimitValue) { selectors.rptLimitValue.textContent = Formatter.formatCurrency(data.rpt_limit_usd); }
+        if (selectors.rptLimitValue) { selectors.rptLimitValue.textContent = Formatter.formatCurrency(data[PAYLOAD_KEYS.RPT_LIMIT_USD]); }
         if (selectors.rptAvailableValue) { 
-            selectors.rptAvailableValue.textContent = Formatter.formatCurrency(data.rpt_available_usd); 
-            selectors.rptAvailableValue.style.color = (data.rpt_available_usd > 0) ? profitColor : lossColor; 
+            selectors.rptAvailableValue.textContent = Formatter.formatCurrency(data[PAYLOAD_KEYS.RPT_AVAILABLE_USD]); 
+            selectors.rptAvailableValue.style.color = (data[PAYLOAD_KEYS.RPT_AVAILABLE_USD] > 0) ? profitColor : lossColor; 
         }
     }
-    
+
     function renderTablesAndFooters(data) {
-        renderTable(selectors.openPositionsTableBody, data.open_positions, createOpenPositionRow, 11, "No active orders");
-        renderTable(selectors.pendingOrdersTableBody, data.pending_orders, createPendingOrderRow, 9, "No pending orders");
-        renderTable(selectors.tradeHistoryTableBody, data.trade_history, createTradeHistoryRow, 7, "No trade history for today");
-        updateTableFooters(data);
+        renderTable(selectors.openPositionsTableBody, data[PAYLOAD_KEYS.OPEN_POSITIONS], createOpenPositionRow, 11, "No active orders");
+        renderTable(selectors.pendingOrdersTableBody, data[PAYLOAD_KEYS.PENDING_ORDERS], createPendingOrderRow, 9, "No pending orders");
+        renderTable(selectors.tradeHistoryTableBody, data[PAYLOAD_KEYS.TRADE_HISTORY], createTradeHistoryRow, 7, "No trade history for today");
+        // updateTableFooters(data); // We can simplify this later if needed
     }
     
     function updateTableFooters(data) {
@@ -289,29 +306,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // SECTION 4.2: UI HELPER FUNCTIONS
     function resetCalculator() { if (selectors.entryPriceInput) selectors.entryPriceInput.value = ''; if (selectors.stopLossInput) selectors.stopLossInput.value = ''; if (selectors.takeProfitInput) selectors.takeProfitInput.value = ''; if (selectors.lotSizeInput) selectors.lotSizeInput.value = '0.00'; if (selectors.potentialLossValue) selectors.potentialLossValue.textContent = '-$0.00'; if (selectors.potentialProfitValue) selectors.potentialProfitValue.textContent = '+$0.00'; if (selectors.rrRatioValue) selectors.rrRatioValue.textContent = '-'; if (selectors.armBtn) { selectors.armBtn.disabled = true; selectors.armBtn.classList.remove('standby-pulse'); } if (selectors.executeBtn) { selectors.executeBtn.disabled = true; selectors.executeBtn.classList.remove('urgent-pulse'); } lastCalculation = {}; }
     function renderTable(tbody, data, rowCreator, colspan, emptyMessage) { if (!tbody || !data) return; tbody.innerHTML = ''; if (data.length === 0) { tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center; color: var(--color-text-secondary);">${emptyMessage}</td></tr>`; return; } data.forEach(item => tbody.insertAdjacentHTML('beforeend', rowCreator(item))); }
-    function createOpenPositionRow(pos) { const profitColor = pos.Profit >= 0 ? 'text-profit' : 'text-loss'; const riskPercentText = pos.risk_percent ? `(${Formatter.formatPercentage(pos.risk_percent)})` : ''; return `<tr><td>${pos.Time || ''}</td><td>${pos.Symbol}</td><td>${pos.Type}</td><td>${pos.Volume}</td><td>${pos.Price}</td><td>${pos.SL || ''}</td><td>${pos.TP || ''}</td><td class="text-loss">${Formatter.formatCurrency(pos.position_risk)} ${riskPercentText}</td><td>${(pos.position_rr || 0).toFixed(2)}</td><td class="${profitColor}">${Formatter.formatCurrency(pos.Profit)}</td><td><button class="btn-close-pos" data-ticket="${pos.Ticket}">Close</button></td></tr>`; }
-    function createPendingOrderRow(order) { return `<tr><td>${order.Time || ''}</td><td>${order.Symbol}</td><td>${order.Type}</td><td>${order.Volume}</td><td>${order.Price}</td><td>${order.SL || ''}</td><td>${order.TP || ''}</td><td class="text-loss">${Formatter.formatCurrency(order.position_risk)}</td><td><button class="btn-close-pos" data-ticket="${order.Ticket}">Cancel</button></td></tr>`; }
-    function createTradeHistoryRow(trade) {
-        const netProfit = trade['Net P/L'] || 0;
-        const profitColor = netProfit >= 0 ? 'text-profit' : 'text-loss';
-        return `<tr>
-            <td>${trade['Close Time'] || ''}</td>
-            <td>${trade.Symbol || ''}</td>
-            <td>${trade.Type || ''}</td>
-            <td>${trade.Volume.toFixed(2) || 0}</td>
-            <td>${Formatter.formatCurrency(trade['Gross P/L'])}</td>
-            <td class="text-loss">${Formatter.formatCurrency(trade.Costs)}</td>
-            <td class="${profitColor}">${Formatter.formatCurrency(netProfit)}</td>
-        </tr>`;
-    }
+    function createOpenPositionRow(pos) { const profitColor = pos.Profit >= 0 ? 'text-profit' : 'text-loss'; const riskPercentText = pos.risk_percent ? `(${Formatter.formatPercentage(pos.risk_percent)})` : ''; return `<tr><td>${Formatter.formatLocalTime(pos.Time)}</td><td>${pos.Symbol}</td><td>${pos.Type}</td><td>${pos.Volume}</td><td>${pos.Price}</td><td>${pos.SL || ''}</td><td>${pos.TP || ''}</td><td class="text-loss">${Formatter.formatCurrency(pos.position_risk)} ${riskPercentText}</td><td>${(pos.position_rr || 0).toFixed(2)}</td><td class="${profitColor}">${Formatter.formatCurrency(pos.Profit)}</td><td><button class="btn-close-pos" data-ticket="${pos.Ticket}">Close</button></td></tr>`; }
+    function createPendingOrderRow(order) { return `<tr><td>${Formatter.formatLocalTime(order.Time)}</td><td>${order.Symbol}</td><td>${order.Type}</td><td>${order.Volume}</td><td>${order.Price}</td><td>${order.SL || ''}</td><td>${order.TP || ''}</td><td class="text-loss">${Formatter.formatCurrency(order.position_risk)}</td><td><button class="btn-close-pos" data-ticket="${order.Ticket}">Cancel</button></td></tr>`; }
+    function createTradeHistoryRow(trade) {const netProfit = trade['Net P/L'] || 0;const profitColor = netProfit >= 0 ? 'text-profit' : 'text-loss';return `<tr><td>${Formatter.formatLocalTime(trade['Close Time'])}</td><td>${trade.Symbol || ''}</td><td>${trade.Type || ''}</td><td>${trade.Volume.toFixed(2) || 0}</td><td>${Formatter.formatCurrency(trade['Gross P/L'])}</td><td class="text-loss">${Formatter.formatCurrency(trade.Costs)}</td><td class="${profitColor}">${Formatter.formatCurrency(netProfit)}</td></tr>`;}
     function renderTradingViewWidget(symbol) { if (!symbol) return; const container = document.getElementById("tradingview-widget-container"); if (!container) return; container.innerHTML = ''; let tvSymbol = ''; const cleanSymbol = symbol.replace(/_$/, ''); if (['XAUUSD', 'XAGUSD'].includes(cleanSymbol)) { tvSymbol = `OANDA:${cleanSymbol}`; } else if (cleanSymbol.includes('WTI') || cleanSymbol.includes('USOIL')) { tvSymbol = 'TVC:USOIL'; } else if (cleanSymbol.includes('BRN') || cleanSymbol.includes('UKOIL')) { tvSymbol = 'TVC:UKOIL'; } else if (cleanSymbol.includes('SP500') || cleanSymbol.includes('US500')) { tvSymbol = 'TVC:SPX'; } else if (cleanSymbol.includes('NQ100') || cleanSymbol.includes('US100')) { tvSymbol = 'TVC:NDX'; } else if (cleanSymbol.includes('DJI30') || cleanSymbol.includes('US30')) { tvSymbol = 'TVC:DJI'; } else if (['ETHUSD', 'BTCUSD'].includes(cleanSymbol)) { tvSymbol = `COINBASE:${cleanSymbol}`; } else { tvSymbol = `OANDA:${cleanSymbol}`; } console.log(`Broker Symbol: ${symbol} -> TradingView Symbol: ${tvSymbol}`); try { tradingViewWidget = new TradingView.widget({ "container_id": "tradingview-widget-container", "autosize": true, "symbol": tvSymbol, "interval": "15", "timezone": "Etc/UTC", "theme": "dark", "style": "1", "locale": "en", "enable_publishing": false, "hide_side_toolbar": false, "details": true, "studies": ["MASimple@tv-basicstudies"] }); } catch (e) { console.error("TradingView Widget Error:", e); container.innerHTML = "Failed to load TradingView Widget."; } }
-    
-    
-    // FILE: main.js
-    // ACTION: REPLACE THE ENTIRE initSymbolSelect FUNCTION (HARD RESET PROTOCOL)
-
-    // FILE: main.js
-    // ACTION: REPLACE THE ENTIRE initSymbolSelect FUNCTION
 
     function initSymbolSelect(symbols) {
         if (!selectors.symbolSelect) return;
@@ -504,11 +502,18 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         startTradingBtn?.addEventListener('click', () => {
-            const balanceValue = openingBalanceInput.value;
-            if (balanceValue && !isNaN(parseFloat(balanceValue)) && parseFloat(balanceValue) > 0) {
+            if (!openingBalanceInput) return;
+
+            // [THE DEFINITIVE FIX] Sanitize the input value before parsing.
+            const rawBalanceValue = openingBalanceInput.value;
+            // This removes any character that is NOT a digit or a period (.).
+            const sanitizedBalanceValue = rawBalanceValue.replace(/[^0-9.]/g, '');
+            const finalBalance = parseFloat(sanitizedBalanceValue);
+
+            if (finalBalance && !isNaN(finalBalance) && finalBalance > 0) {
                 socket.send(JSON.stringify({ 
                     event: "START_SESSION", 
-                    payload: { openingBalance: parseFloat(balanceValue) } 
+                    payload: { openingBalance: finalBalance } 
                 }));
                 startTradingBtn.disabled = true;
                 startTradingBtn.textContent = "INITIALIZING...";

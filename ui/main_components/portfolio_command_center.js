@@ -115,6 +115,7 @@ const PortfolioCommandCenter = {
             PortfolioName: form.querySelector(`[name="PortfolioName"]`)?.value,
             InitialBalance: parseFloat(form.querySelector(`[name="InitialBalance"]`)?.value) || 0,
             mt5_account_id: form.querySelector(`[name="mt5_account_id"]`)?.value || null,
+            BrokerName: form.querySelector(`[name="BrokerName"]`)?.value || 'Unknown', // <--- [FIX] เพิ่ม BrokerName
             ProgramType: form.querySelector(`[name="ProgramType"]`)?.value,
             EvaluationStep: form.querySelector(`[name="EvaluationStep"]`)?.value,
             Status: form.querySelector(`[name="Status"]`)?.value,
@@ -122,7 +123,7 @@ const PortfolioCommandCenter = {
             ProfitTargetPercent: parseFloat(form.querySelector(`[name="ProfitTargetPercent"]`)?.value) || 0,
             DailyLossLimitPercent: parseFloat(form.querySelector(`[name="DailyLossLimitPercent"]`)?.value) || 0,
             TotalStopoutPercent: parseFloat(form.querySelector(`[name="TotalStopoutPercent"]`)?.value) || 0,
-            ProfitConsistencyRulePercent: parseFloat(form.querySelector(`[name="ProfitConsistencyRulePercent"]`)?.value) || 0, // <-- RESTORED
+            ProfitConsistencyRulePercent: parseFloat(form.querySelector(`[name="ProfitConsistencyRulePercent"]`)?.value) || 0, // <--- [FIX] เพิ่มบรรทัดนี้
             Notes: form.querySelector(`[name="Notes"]`)?.value
         };
 
