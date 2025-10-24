@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 # from .ai_section import render_ai_insights # Assuming this will be created later
-from core import gs_handler, portfolio_logic, analytics_engine
+from core import  portfolio_logic, analytics_engine
 from config import settings # ตรวจสอบว่ามีบรรทัดนี้อยู่แล้ว (สำคัญ!)
 
 # =============================================================================
@@ -35,12 +35,14 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
 
     # --- Fetch all statistics ---
     active_id = st.session_state.get('active_portfolio_id_gs')
-    advanced_stats = analytics_engine.get_advanced_statistics(df_all_actual_trades=df_actual_trades, active_portfolio_id=active_id)
-    full_stats = analytics_engine.get_full_dashboard_stats(
-        df_all_actual_trades=df_actual_trades,
-        df_all_summaries=df_summaries,
-        active_portfolio_id=active_id
-    )
+    #advanced_stats = analytics_engine.get_advanced_statistics(df_all_actual_trades=df_actual_trades, active_portfolio_id=active_id)
+    advanced_stats = {}
+    #full_stats = analytics_engine.get_full_dashboard_stats(
+    #    df_all_actual_trades=df_actual_trades,
+    #    df_all_summaries=df_summaries,
+    #    active_portfolio_id=active_id
+    #)
+    full_stats = {} 
 
     # --- Section 1: Title and Details Box ---
     with st.container(border=True):
@@ -188,7 +190,8 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
     st.subheader("🤖 AI-Powered Insights")
     with st.container(border=True):
         # ดึงข้อมูล Insights จาก analytics_engine
-        insights = analytics_engine.get_ai_powered_insights(df_actual_trades, active_id)
+        #insights = analytics_engine.get_ai_powered_insights(df_actual_trades, active_id)
+        insights = {}
         
         if not insights:
             st.info("Not enough data to generate insights.")
@@ -218,7 +221,7 @@ def _render_portfolio_header(details: dict, df_actual_trades: pd.DataFrame, df_s
 
 # =============================================================================            
 
-def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, portfolio_to_edit_data={}):
+def _render_portfolio_form(is_edit_mode, db_handler_instance, df_portfolios_gs, portfolio_to_edit_data={}):
     """
     Renders the form to add or edit a portfolio, with all labels in English.
     """
@@ -412,7 +415,7 @@ def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, 
                     data_to_save["CreationDate"] = portfolio_to_edit_data.get("CreationDate", date.today().strftime('%Y-%m-%d %H:%M:%S'))
                     
                     with st.spinner("Updating..."): 
-                        success, msg = gs_handler_instance.update_portfolio_in_gsheets(portfolio_id_to_update, data_to_save)
+                        success, msg = db_handler_instance.update_portfolio(portfolio_id_to_update, data_to_save)
                     if success: st.success(msg)
                     else: st.error(msg)
                 else:
@@ -420,7 +423,7 @@ def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, 
                         st.error(f"Portfolio name '{form_new_portfolio_name}' already exists.")
                     else:
                         with st.spinner("Saving..."): 
-                            success_save, msg_save = gs_handler_instance.save_new_portfolio_to_gsheets(data_to_save)
+                            success_save, msg_save = db_handler_instance.save_new_portfolio(data_to_save)
                         if success_save:
                             st.success(msg_save)
                             if session_key_program_type in st.session_state:
@@ -428,7 +431,7 @@ def _render_portfolio_form(is_edit_mode, gs_handler_instance, df_portfolios_gs, 
                         else: st.error(msg_save)
 
 
-def render_portfolio_manager_expander(gs_handler_instance, df_portfolios):
+def render_portfolio_manager_expander(db_handler, df_portfolios):
     """
     Renders the main expander and tabs for portfolio management.
     """
@@ -440,32 +443,32 @@ def render_portfolio_manager_expander(gs_handler_instance, df_portfolios):
             # ===================================================================
             # ===== START: โค้ดส่วนแก้ไขที่เพิ่มเข้ามา =====
             # ===================================================================
-            df_actual_trades = gs_handler.load_actual_trades_from_gsheets()
-            df_summaries = gs_handler.load_statement_summaries_from_gsheets()
+            df_actual_trades = db_handler.load_actual_trades()
+            df_summaries = db_handler.load_statement_summaries()
             active_portfolio_id = st.session_state.get('active_portfolio_id_gs')
 
-            if active_portfolio_id:
-                (
-                    df_equity_curve_data,
-                    realized_net_profit,
-                    total_deposit,
-                    total_withdrawal,
-                    total_net_profit_from_sheet
-                ) = analytics_engine.calculate_true_equity_curve(
-                    df_summaries=df_summaries,
-                    portfolio_id=active_portfolio_id
-                )
-                st.session_state['df_equity_curve_data'] = df_equity_curve_data
-                st.session_state['realized_profit_loss'] = realized_net_profit
-                st.session_state['total_deposit_amount'] = total_deposit
-                st.session_state['total_withdrawal_amount'] = total_withdrawal
-                st.session_state['total_net_profit_from_sheet'] = total_net_profit_from_sheet
-            else:
-                st.session_state['df_equity_curve_data'] = None
-                st.session_state['realized_profit_loss'] = None
-                st.session_state['total_deposit_amount'] = None
-                st.session_state['total_withdrawal_amount'] = None
-                st.session_state['total_net_profit_from_sheet'] = None
+            #if active_portfolio_id:
+            #    (
+            #        df_equity_curve_data,
+            #        realized_net_profit,
+            #        total_deposit,
+            #        total_withdrawal,
+            #        total_net_profit_from_sheet
+            #    ) = analytics_engine.calculate_true_equity_curve(
+            #        df_summaries=df_summaries,
+            #        portfolio_id=active_portfolio_id
+            #    )
+            #    st.session_state['df_equity_curve_data'] = df_equity_curve_data
+            #    st.session_state['realized_profit_loss'] = realized_net_profit
+            #    st.session_state['total_deposit_amount'] = total_deposit
+            #    st.session_state['total_withdrawal_amount'] = total_withdrawal
+            #    st.session_state['total_net_profit_from_sheet'] = total_net_profit_from_sheet
+            #else:
+            #    st.session_state['df_equity_curve_data'] = None
+            #    st.session_state['realized_profit_loss'] = None
+            #    st.session_state['total_deposit_amount'] = None
+            #    st.session_state['total_withdrawal_amount'] = None
+            #    st.session_state['total_net_profit_from_sheet'] = None
             
             # ===================================================================
             # ===== END: สิ้นสุดโค้ดที่แก้ไข =====
@@ -488,7 +491,7 @@ def render_portfolio_manager_expander(gs_handler_instance, df_portfolios):
             st.subheader("➕ Add New Portfolio")
             _render_portfolio_form(
                 is_edit_mode=False,
-                gs_handler_instance=gs_handler_instance,
+                db_handler_instance=db_handler,
                 df_portfolios_gs=df_portfolios
             )
 
@@ -511,7 +514,7 @@ def render_portfolio_manager_expander(gs_handler_instance, df_portfolios):
                     st.markdown(f"### ✏️ Edit Details for '{name_to_action}'")
                     _render_portfolio_form(
                         is_edit_mode=True,
-                        gs_handler_instance=gs_handler_instance,
+                        db_handler_instance=db_handler,
                         portfolio_to_edit_data=data_to_action, 
                         df_portfolios_gs=df_portfolios
                     )
@@ -521,7 +524,7 @@ def render_portfolio_manager_expander(gs_handler_instance, df_portfolios):
                     confirm_delete = st.checkbox(f"I understand and want to delete '{name_to_action}'", key=f"del_confirm_{portfolio_id}")
                     
                     if st.button(f"Confirm Deletion", type="primary", disabled=not confirm_delete):
-                        success, msg = gs_handler_instance.delete_portfolio_from_gsheets(portfolio_id)
+                        success, msg = db_handler.delete_portfolio(portfolio_id)
                         if success:
                             st.success(msg)
                             st.rerun()

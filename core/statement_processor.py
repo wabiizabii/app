@@ -1,17 +1,37 @@
-# core/statement_processor.py (The Definitive Final Version - Based on Original Full Code)
+# core/statement_processor.py (ฉบับแก้ไขสมบูรณ์และพร้อมใช้งาน)
 
 import pandas as pd
 import io
 import re
 from datetime import datetime
-from config import settings 
+from config import settings
+import numpy as np
+import pytz
+import uuid # เพิ่ม import uuid ตรงนี้
+
+# --- NEW: Helper function to ensure datetime is timezone-aware and in UTC ---
+def _ensure_utc_datetime(series: pd.Series) -> pd.Series:
+    """
+    Ensures a pandas Series of datetime objects is timezone-aware (UTC)
+    for consistent comparisons.
+    """
+    if not pd.api.types.is_datetime64_any_dtype(series):
+        series = pd.to_datetime(series, errors='coerce')
+
+    series = series.dropna()
+
+    if series.empty:
+        return series
+
+    if series.dt.tz is None:
+        return series.dt.tz_localize(pytz.utc)
+    elif series.dt.tz != pytz.utc:
+        return series.dt.tz_convert(pytz.utc)
+    return series
 
 def extract_data_from_report_content(file_content_input: bytes):
     """
-    [The Definitive Final Version]
-    This version uses the full, original code as its base and makes only the
-    necessary corrections to the Balance/Equity parsing and the final decision logic,
-    ensuring all statistics are captured correctly across all scenarios.
+    Extracts data from a trading statement report content (CSV format).
     """
     extracted_data = {
         'deals': pd.DataFrame(),
@@ -25,9 +45,10 @@ def extract_data_from_report_content(file_content_input: bytes):
     
     lines = []
     if isinstance(file_content_input, str):
+        # Decode as utf-8-sig to handle BOM (Byte Order Mark) if present
         lines = file_content_input.strip().split('\n')
     elif isinstance(file_content_input, bytes):
-        lines = file_content_input.decode('utf-8', errors='replace').strip().split('\n')
+        lines = file_content_input.decode('utf-8-sig', errors='replace').strip().split('\n')
     else:
         return extracted_data
 
@@ -43,40 +64,17 @@ def extract_data_from_report_content(file_content_input: bytes):
         try: return float(s)
         except (ValueError, TypeError): return 0.0
 
-    def parse_summary_line_item(line, key_word):
-        match = re.search(r"Average consecutive wins:,\s*([-\s\d\.]+)(?:,*\s*)Average consecutive losses:,\s*([-\s\d\.]+)", line_stripped)
+    # These parse_summary_line_item and parse_results_section_line are currently unused
+    def parse_summary_line_item(line, key_word): 
+        match = re.search(r"Average consecutive wins:,\s*([-\s\d\.]+)(?:,*\s*)Average consecutive losses:,\s*([-\s\d\.]+)", line) 
         if match:
-            val1 = clean_and_float(match.group(1)); val2 = None; is_percent = False
-            if match.group(2): val2 = clean_and_float(match.group(2)); is_percent = bool(match.group(3))
-            return val1, val2, is_percent
-        return None, None, False
-
-    def parse_count_and_percent(line, key_word):
-        match = re.search(rf"{key_word}:,(?:,*?)(\d+)\s*\(([-+]?\d*\.?\d+)%\)", line)
-        if match:
-            try: return int(clean_and_float(match.group(1))), clean_and_float(match.group(2))
-            except ValueError: pass
-        return None, None
-    
-    def parse_count_and_value(line, key_word):
-        match = re.search(rf"{key_word}:,(?:,*?)(\d+)\s*\(([-+]?\d*\.?\d+)\)", line)
-        if match:
-            try: return int(clean_and_float(match.group(1))), clean_and_float(match.group(2))
-            except ValueError: pass
+            val1 = clean_and_float(match.group(1))
+            val2 = clean_and_float(match.group(2))
+            return val1, val2
         return None, None
 
-    def parse_value_and_count(line, key_word):
-        match = re.search(rf"{key_word}:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*)\s*\(([-+]?\s*\d+)\)", line)
-        if match:
-            try: return clean_and_float(match.group(1)), int(clean_and_float(match.group(2)))
-            except ValueError: pass
-        return None, None
-
-    def parse_results_section_line(line):
+    def parse_results_section_line(line): 
         data = {}
-        # Patterns for key-value pairs in the Results section
-        # Note: These patterns are designed to capture the specific format in your raw CSV
-        # โดยการปรับปรุง Pattern ให้ครอบคลุมคอลัมน์พิเศษใน Results ที่อาจจะมี commas เพิ่มเติม
         patterns = {
             "Total Net Profit": r"Total Net Profit:,,,\s*([-\s\d\.]+)",
             "Gross Profit": r"Gross Profit:,,,\s*([-\s\d\.]+)",
@@ -89,10 +87,10 @@ def extract_data_from_report_content(file_content_input: bytes):
             "Balance Drawdown Maximal": r"Balance Drawdown Maximal:,,,\s*([-\s\d\.]+)\s*\(([-+]?\s*\d[\d\s\.,-]*)\%\)",
             "Balance Drawdown Relative": r"Balance Drawdown Relative:,,,\s*([-\s\d\.]+)\%\s*\(([-+]?\s*\d[\d\s\.,-]*)\)",
             "Total Trades": r"Total Trades:,,,\s*(\d+)",
-            "Short Trades \(won %\):": r"Short Trades \(won %\):,,,\s*(\d+)\s*\(([-+]?\d*\.?\d+)%\)", # แยก Total, %
-            "Long Trades \(won %\):": r"Long Trades \(won %\):,,,\s*(\d+)\s*\(([-+]?\d*\.?\d+)%\)", # แยก Total, %
-            "Profit Trades \(% of total\):": r"Profit Trades \(% of total\):,,,\s*(\d+)\s*\(([-+]?\d*\.?\d+)%\)", # แยก Total, %
-            "Loss Trades \(% of total\):": r"Loss Trades \(% of total\):,,,\s*(\d+)\s*\(([-+]?\d*\.?\d+)%\)", # แยก Total, %
+            "Short Trades \(won %\):": r"Short Trades \(won %\):,,,\s*(\d+)\s*\(([-+]?\d*\.?\d+)%\)",
+            "Long Trades \(won %\):": r"Long Trades \(won %\):,,,\s*(\d+)\s*\(([-+]?\d*\.?\d+)%\)",
+            "Profit Trades \(% of total\):": r"Profit Trades \(% of total\):,,,\s*(\d+)\s*\(([-+]?\s*\d*\.?\d+)%\)",
+            "Loss Trades \(% of total\):": r"Loss Trades \(% of total\):,,,\s*(\d+)\s*\(([-+]?\s*\d*\.?\d+)%\)",
             "Largest profit trade": r"Largest profit trade:,,,\s*([-\s\d\.]+)",
             "Largest loss trade": r"Largest loss trade:,,,\s*([-\s\d\.]+)",
             "Average profit trade": r"Average profit trade:,,,\s*([-\s\d\.]+)",
@@ -104,81 +102,49 @@ def extract_data_from_report_content(file_content_input: bytes):
             "Average consecutive wins": r"Average consecutive wins:,,,\s*([-\s\d\.]+)",
             "Average consecutive losses": r"Average consecutive losses:,,,\s*([-\s\d\.]+)"
         }
-
-        # ใช้ clean_and_float จากโค้ดของคุณ
-        def local_clean_and_float(value_str):
-            if value_str is None: return 0.0
-            s = str(value_str).strip().replace(' ', '').replace(',', '').replace('–', '-').replace('—', '-')
-            if s.endswith('%'): s = s[:-1]
-            try: return float(s)
-            except (ValueError, TypeError): return 0.0
-
+        
         for key_prefix, pattern_str in patterns.items():
             match = re.search(pattern_str, line)
             if match:
-                # Handle cases with two captured groups (e.g., "Count (Percentage)" or "Value (Count)")
                 if len(match.groups()) == 2:
                     val1 = match.group(1)
                     val2 = match.group(2)
-
-                    # Special handling for specific fields to match desired output format or type
                     if key_prefix == "Balance Drawdown Maximal":
-                        data['Maximal_Drawdown_Value'] = local_clean_and_float(val1)
-                        data['Maximal_Drawdown_Percent'] = local_clean_and_float(val2)
-                        # Display format as "VALUE (PERCENTAGE%)"
-                        data[key_prefix] = f"{val1} ({val2}%)" 
+                        data['Maximal_Drawdown_Value'] = clean_and_float(val1)
+                        data['Maximal_Drawdown_Percent'] = clean_and_float(val2)
                     elif key_prefix == "Balance Drawdown Relative":
-                        data['Balance_Drawdown_Relative_Percent'] = local_clean_and_float(val1)
-                        data['Balance_Drawdown_Relative_Value'] = local_clean_and_float(val2)
-                        # Display format as "PERCENTAGE% (VALUE)"
-                        data[key_prefix] = f"{val1}% ({val2})"
-                    elif key_prefix in ["Short Trades \(won %\):", "Long Trades \(won %\):",
-                                        "Profit Trades \(% of total\):", "Loss Trades \(% of total\):"]:
-                        # For "Total Trades: 76,Short Trades (won %):,,,\s*39\s*(17.95%),Long Trades (won %):,,,\s*37\s*(24.32%),,"
-                        # The original regex in extract_data_from_report_content already handles these specific lines.
-                        # This function parse_results_section_line will only be called per line for other Results
-                        # So, these patterns won't typically be fully matched by line.
-                        # We will make sure the main loop handles it.
-                        pass # This function specifically will not process these from a single line
-                    elif key_prefix == "Maximum consecutive wins": # 4 (1 445.58)
-                        data['Max_Consecutive_Wins_Count'] = int(local_clean_and_float(val1))
-                        data['Max_Consecutive_Wins_Profit'] = local_clean_and_float(val2)
-                        data[key_prefix + ' ($)'] = f"{val1} ({val2})" # Use original format
-                    elif key_prefix == "Maximum consecutive losses": # 25 (-6 874.60)
-                        data['Max_Consecutive_Losses_Count'] = int(local_clean_and_float(val1))
-                        data['Max_Consecutive_Losses_Profit'] = local_clean_and_float(val2)
-                        data[key_prefix + ' ($)'] = f"{val1} ({val2})" # Use original format
-                    elif key_prefix == "Maximal consecutive profit": # 1 715.10 (2)
-                        data['Maximal_Consecutive_Profit_Value'] = local_clean_and_float(val1)
-                        data['Maximal_Consecutive_Profit_Count'] = int(local_clean_and_float(val2))
-                        data[key_prefix + ' (count)'] = f"{val1} ({val2})" # Use original format
-                    elif key_prefix == "Maximal consecutive loss": # -6 874.60 (25)
-                        data['Maximal_Consecutive_Loss_Value'] = local_clean_and_float(val1)
-                        data['Maximal_Consecutive_Loss_Count'] = int(local_clean_and_float(val2))
-                        data[key_prefix + ' (count)'] = f"{val1} ({val2})" # Use original format
-                else: # Handle cases with a single captured group (most numeric values)
-                    # Specific names for direct mapping
+                        data['Balance_Drawdown_Relative_Percent'] = clean_and_float(val1)
+                        data['Balance_Drawdown_Relative_Value'] = clean_and_float(val2)
+                    elif key_prefix == "Maximum consecutive wins": 
+                        data['Max_Consecutive_Wins_Count'] = int(clean_and_float(val1))
+                        data['Max_Consecutive_Wins_Profit'] = clean_and_float(val2)
+                    elif key_prefix == "Maximum consecutive losses": 
+                        data['Max_Consecutive_Losses_Count'] = int(clean_and_float(val1))
+                        data['Max_Consecutive_Losses_Profit'] = clean_and_float(val2)
+                    elif key_prefix == "Maximal consecutive profit": 
+                        data['Maximal_Consecutive_Profit_Value'] = clean_and_float(val1)
+                        data['Maximal_Consecutive_Profit_Count'] = int(clean_and_float(val2))
+                    elif key_prefix == "Maximal consecutive loss": 
+                        data['Maximal_Consecutive_Loss_Value'] = clean_and_float(val1)
+                        data['Maximal_Consecutive_Loss_Count'] = int(clean_and_float(val2))
+                else: 
                     if key_prefix == "Total Trades":
-                        data[key_prefix] = int(local_clean_and_float(match.group(1)))
+                        data[key_prefix] = int(clean_and_float(match.group(1)))
                     elif key_prefix in ["Average consecutive wins", "Average consecutive losses"]:
-                        data[key_prefix] = int(local_clean_and_float(match.group(1))) # Assuming these are always integers
+                        data[key_prefix] = int(clean_and_float(match.group(1))) 
                     else:
-                        data[key_prefix] = local_clean_and_float(match.group(1))
-                break # Stop after first match on a line
-
+                        data[key_prefix] = clean_and_float(match.group(1))
+                break 
         return data
 
-    # ### เพิ่มเติมจุดที่ 1: ตัวแปรสำหรับปักธงสถานการณ์พิเศษ ###
     has_open_positions_flag = False
 
     for line in lines:
         line_stripped = line.strip()
         
-        # ### เพิ่มเติมจุดที่ 2: ตรวจจับ "ป้าย" Open Positions ###
         if "Open Positions" in line_stripped and len(line_stripped) < 30:
             has_open_positions_flag = True
 
-        # (โค้ดการ parse ทั้งหมดในลูปนี้ คือของเดิมที่คุณเขียนไว้ทั้งหมด)
         if line_stripped.startswith("Account:"):
             match = re.search(r"Account:.*?,*?\"?(\d+)(?:\s*\(.*?\))?\"?", line_stripped)
             if match: portfolio_details['account_id'] = match.group(1)
@@ -192,9 +158,6 @@ def extract_data_from_report_content(file_content_input: bytes):
             match = re.search(r"Client:\s*(.+)", line_stripped)
             if match: portfolio_details['client_name'] = match.group(1).strip()
         
-        # ### แก้ไขจุดที่ 3: ทลาย "กฎเหล็ก" และค้นหาแต่ละค่าอย่างอิสระ ###
-        # ลบ if เดิมที่เช็ค "Balance:" และ "Equity:" พร้อมกันทิ้งไป
-        
         if "Balance:" in line_stripped:
             match = re.search(r"Balance:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*)", line_stripped)
             if match: balance_summary_parsed_from_text['Balance'] = clean_and_float(match.group(1))
@@ -207,12 +170,12 @@ def extract_data_from_report_content(file_content_input: bytes):
             match = re.search(r"Floating P/L:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*)", line_stripped)
             if match: balance_summary_parsed_from_text['Floating_P_L'] = clean_and_float(match.group(1))
         
-        # (โค้ดการ parse สถิติที่เหลือทั้งหมด คือของเดิมที่คุณเขียนไว้ ไม่มีการเปลี่ยนแปลง)
         if "Credit Facility:" in line_stripped:
-            val, _, _ = parse_summary_line_item(line_stripped, "Credit Facility")
-            if val is not None: balance_summary_parsed_from_text['Credit_Facility'] = val
+            val_match = re.search(r"Credit Facility:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*)", line_stripped)
+            if val_match: balance_summary_parsed_from_text['Credit_Facility'] = clean_and_float(val_match.group(1))
+        
         if "Total Net Profit:" in line_stripped and "Gross Profit:" in line_stripped and "Gross Loss:" in line_stripped:
-            match = re.search(r"Total Net Profit:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*),*?Gross Profit:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*),*?Gross Loss:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*),*", line_stripped)
+            match = re.search(r"Total Net Profit:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*),*?Gross Profit:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*),*?Gross Loss:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*)", line_stripped)
             if match:
                 results_summary_parsed_from_text['Total_Net_Profit_Text'] = clean_and_float(match.group(1))
                 results_summary_parsed_from_text['Gross_Profit'] = clean_and_float(match.group(2))
@@ -235,8 +198,9 @@ def extract_data_from_report_content(file_content_input: bytes):
                 results_summary_parsed_from_text['Balance_Drawdown_Relative_Percent'] = clean_and_float(match.group(3))
                 results_summary_parsed_from_text['Balance_Drawdown_Relative_Value'] = clean_and_float(match.group(4))
         if "Balance Drawdown Absolute:" in line_stripped:
-            val, _, _ = parse_summary_line_item(line_stripped, "Balance Drawdown Absolute")
-            if val is not None: results_summary_parsed_from_text['Balance_Drawdown_Absolute'] = val
+            val_match = re.search(r"Balance Drawdown Absolute:,(?:,*?)([-+]?\s*\d[\d\s\.,-]*)", line_stripped)
+            if val_match: results_summary_parsed_from_text['Balance_Drawdown_Absolute'] = clean_and_float(val_match.group(1))
+        
         if "Total Trades:" in line_stripped and "Short Trades (won %):" in line_stripped:
             match = re.search(r"Total Trades:(?:,+)\s*(\d+)(?:,+)\s*Short Trades \(won %\):(?:\s*,+)\s*(\d+)\s*\(([-+]?\s*\d*\.?\d+)%\)(?:,+)\s*Long Trades \(won %\):(?:\s*,+)\s*(\d+)\s*\(([-+]?\s*\d*\.?\d+)%\)", line_stripped)
             if match:
@@ -279,7 +243,6 @@ def extract_data_from_report_content(file_content_input: bytes):
         if "Average consecutive wins:" in line_stripped and "Average consecutive losses:" in line_stripped:
             match = re.search(r"(?:,*\s*)Average consecutive wins:(?:,+)\s*([-\s\d\.]+)(?:,+)\s*Average consecutive losses:(?:,+)\s*([-\s\d\.]+)", line_stripped)
             if match:
-                # ใช้ int(float(...)) เพื่อให้แน่ใจว่าค่าถูกแปลงเป็นตัวเลขก่อนและเป็นจำนวนเต็ม
                 results_summary_parsed_from_text['Average_Consecutive_Wins'] = int(clean_and_float(match.group(1)))
                 results_summary_parsed_from_text['Average_Consecutive_Losses'] = int(clean_and_float(match.group(2)))
 
@@ -287,48 +250,184 @@ def extract_data_from_report_content(file_content_input: bytes):
     extracted_data['balance_summary'].update(balance_summary_parsed_from_text) 
     extracted_data['results_summary'].update(results_summary_parsed_from_text)
 
-    # --- 2 & 3: การหาและดึงข้อมูลตาราง (คงไว้ตามเดิม) ---
-    section_headers_map = {"Positions": "Time,Position,Symbol,Type,Volume,Price,S / L,T / P,Time,Price,Commission,Swap,Profit", "Orders": "Open Time,Order,Symbol,Type,Volume,Price,S / L,T / P,Time,State,,Comment", "Deals": "Time,Deal,Symbol,Type,Direction,Volume,Price,Order,Commission,Fee,Swap,Profit,Balance,Comment"}
-    expected_columns_map = {"Positions": ["Time_Pos", "Position_ID", "Symbol_Pos", "Type_Pos", "Volume_Pos", "Price_Open_Pos", "S_L_Pos", "T_P_Pos", "Time_Close_Pos", "Price_Close_Pos", "Commission_Pos", "Swap_Pos", "Profit_Pos"], "Orders": ["Open_Time_Ord", "Order_ID_Ord", "Symbol_Ord", "Type_Ord", "Volume_Ord", "Price_Ord", "S_L_Ord", "T_P_Ord", "Close_Time_Ord", "State_Ord", "Filler_Ord", "Comment_Ord"], "Deals": ["Time_Deal", "Deal_ID", "Symbol_Deal", "Type_Deal", "Direction_Deal", "Volume_Deal", "Price_Deal", "Order_ID_Deal", "Commission_Deal", "Fee_Deal", "Swap_Deal", "Profit_Deal", "Balance_Deal", "Comment_Deal"]}
+    # --- 2 & 3: การหาและดึงข้อมูลตาราง ---
+    section_headers_map = settings.SECTION_RAW_HEADERS_STATEMENT_PARSING
+    expected_columns_map_from_settings = {
+        "Positions": settings.WORKSHEET_HEADERS[settings.SUPABASE_TABLE_ACTUAL_POSITIONS],
+        "Orders": settings.WORKSHEET_HEADERS[settings.SUPABASE_TABLE_ACTUAL_ORDERS],
+        "Deals": settings.WORKSHEET_HEADERS[settings.SUPABASE_TABLE_ACTUAL_TRADES]
+    }
+
     section_order = ["Positions", "Orders", "Deals"]
     header_indices = {name: -1 for name in section_order}
+
     for i, line in enumerate(lines):
+        line_stripped = line.strip()
         for name, header_text in section_headers_map.items():
-            if header_text in line: header_indices[name] = i; break
+            pattern = r'^' + re.escape(header_text).replace(r'\ ', r'\s*').replace(r'\,', ',') + r'\s*,*$' # เพิ่ม r'\s*,*$'
+            if re.match(pattern, line_stripped):
+                header_indices[name] = i
+                break
+
     for i, section_name in enumerate(section_order):
         start_index = header_indices[section_name]
-        if start_index == -1: continue
-        data_start_line, data_end_line = start_index + 1, len(lines)
-        for next_section_name in section_order[i+1:]:
-            if header_indices[next_section_name] != -1 and header_indices[next_section_name] > start_index: data_end_line = header_indices[next_section_name]; break
-        summary_start_patterns = [r"^Balance:", r"^Credit Facility:", r"^Total Net Profit:", r"Open Positions"]
-        for j in range(data_start_line, data_end_line):
-            if any(re.match(r"^(?:,*?)\s*" + pattern, lines[j].strip()) for pattern in summary_start_patterns): data_end_line = j; break
-        section_lines = [line.strip() for line in lines[data_start_line:data_end_line] if line.strip() and ',' in line]
-        if not section_lines: continue
-        try:
-            df = pd.read_csv(io.StringIO("\n".join(section_lines)), header=None, names=expected_columns_map[section_name], skipinitialspace=True, dtype=str)
-            extracted_data[section_name.lower()] = df.dropna(how='all')
-        except Exception as e: print(f"Error parsing {section_name} section: {e}")
+        if start_index == -1:
+            continue
 
-    # --- 4. การคำนวณจาก Deals ---
-    deals_df = extracted_data.get('deals', pd.DataFrame())
-    if not deals_df.empty:
-        deals_df_copy = deals_df.copy()
-        for col in ['Profit_Deal', 'Balance_Deal']: deals_df_copy[col] = pd.to_numeric(deals_df_copy[col].astype(str).str.replace(' ', '').str.replace('–', '-').replace('—', '-'), errors='coerce').fillna(0)
+        data_start_line, data_end_line = start_index + 1, len(lines)
         
-        extracted_data['results_summary']['Total_Net_Profit'] = deals_df_copy[deals_df_copy['Type_Deal'].str.lower().isin(['buy', 'sell'])]['Profit_Deal'].sum()
+        for j, line_content in enumerate(lines[data_start_line:], start=data_start_line):
+            line_stripped = line_content.strip()
+            
+            found_next_header = False
+            for next_section_name in section_order[i+1:]:
+                next_header_text = section_headers_map[next_section_name]
+                next_pattern = r'^' + re.escape(next_header_text).replace(r'\ ', r'\s*').replace(r'\,', ',') + r'\s*,*$' # เพิ่ม r'\s*,*$'
+                if re.match(next_pattern, line_stripped):
+                    data_end_line = j
+                    found_next_header = True
+                    break
+            if found_next_header:
+                break
+            
+            summary_start_patterns_full = [
+                r"^Balance:", r"^Credit Facility:", r"^Total Net Profit:", 
+                r"^Open Positions", r"^Results"
+            ]
+            if any(re.match(pattern, line_stripped) for pattern in summary_start_patterns_full):
+                data_end_line = j
+                break
+            
+            if not line_stripped or re.fullmatch(r",*", line_stripped):
+                if j + 1 < len(lines):
+                    next_line_stripped = lines[j+1].strip()
+                    if not next_line_stripped or re.fullmatch(r",*", next_line_stripped):
+                        data_end_line = j
+                        break
+
+        section_lines = [line.strip() for line in lines[data_start_line:data_end_line] if line.strip() and ',' in line]
         
-        # ### แก้ไข: ใช้ "กฎ" การอ่าน Comment ในการคำนวณยอดรวม D/W ###
+        if not section_lines:
+            extracted_data[section_name.lower()] = pd.DataFrame(columns=expected_columns_map_from_settings[section_name])
+            continue
+        
+        try:
+            raw_header_line = lines[start_index].strip()
+            
+            df_parsed_raw = pd.read_csv(io.StringIO("\n".join([raw_header_line] + section_lines)), 
+                                        header=0, 
+                                        skipinitialspace=True, 
+                                        dtype=str)
+            
+            column_rename_map = {}
+            target_cols_settings = expected_columns_map_from_settings[section_name]
+            
+            temp_io = io.StringIO(section_headers_map[section_name])
+            temp_df_for_pandas_headers = pd.read_csv(temp_io, nrows=0, skipinitialspace=True, dtype=str)
+            pandas_inferred_headers_from_template = list(temp_df_for_pandas_headers.columns)
+
+            for i, inferred_col in enumerate(pandas_inferred_headers_from_template):
+                if i < len(target_cols_settings):
+                    column_rename_map[inferred_col] = target_cols_settings[i]
+                
+            df_final = df_parsed_raw.rename(columns=column_rename_map)
+
+            df_final = df_final.reindex(columns=expected_columns_map_from_settings[section_name])
+            
+            if not df_final.empty:
+                if 'id' in df_final.columns:
+                    df_final.drop(columns=['id'], inplace=True, errors='ignore')
+
+                if section_name == "Deals":
+                    for col in ['Volume_Deal', 'Price_Deal', 'Commission_Deal', 'Fee_Deal', 'Swap_Deal', 'Profit_Deal', 'Balance_Deal']:
+                        if col in df_final.columns:
+                            df_final[col] = pd.to_numeric(df_final[col].astype(str).str.replace(' ', '').str.replace(',', '').str.replace('–', '-').str.replace('—', '-'), errors='coerce').fillna(0)
+                    
+                    if 'Deal_ID' in df_final.columns:
+                        df_final['Deal_ID'] = df_final['Deal_ID'].astype(str).replace('nan', '').apply(
+                            lambda x: x if x.strip() else str(uuid.uuid4())
+                        )
+
+                    if 'Time_Deal' in df_final.columns:
+                        df_final['Time_Deal'] = pd.to_datetime(df_final['Time_Deal'], format="%Y.%m.%d %H:%M:%S", errors='coerce')
+                        df_final['Time_Deal'] = df_final['Time_Deal'].fillna(pd.to_datetime(df_final['Time_Deal'].astype(str), errors='coerce'))
+                        df_final['Time_Deal'] = _ensure_utc_datetime(df_final['Time_Deal'])
+
+                elif section_name == "Orders":
+                    for col in ['Price_Ord', 'S_L_Ord', 'T_P_Ord']: 
+                        if col in df_final.columns:
+                            df_final[col] = pd.to_numeric(df_final[col].astype(str).str.replace(' ', '').str.replace(',', '').str.replace('–', '-').str.replace('—', '-'), errors='coerce').fillna(0)
+                    
+                    if 'Volume_Ord_Raw' in df_final.columns:
+                        df_final['Volume_Ord'] = df_final['Volume_Ord_Raw'].astype(str).apply(
+                            lambda x: pd.to_numeric(x.split(' ')[0], errors='coerce') if ' ' in x else pd.to_numeric(x, errors='coerce')
+                        ).fillna(0.0) 
+                        df_final.drop(columns=['Volume_Ord_Raw'], inplace=True, errors='ignore')
+                    else: 
+                        df_final['Volume_Ord'] = 0.0
+
+                    if 'Order_ID_Ord' in df_final.columns:
+                        df_final['Order_ID_Ord'] = df_final['Order_ID_Ord'].astype(str).replace('nan', '').apply(
+                            lambda x: x if x.strip() else str(uuid.uuid4())
+                        )
+
+                    for col in ['Open_Time_Ord', 'Close_Time_Ord']:
+                        if col in df_final.columns:
+                            df_final[col] = pd.to_datetime(df_final[col], format="%Y.%m.%d %H:%M:%S", errors='coerce')
+                            df_final[col] = df_final[col].fillna(pd.to_datetime(df_final[col].astype(str), errors='coerce')) 
+                            df_final[col] = _ensure_utc_datetime(df_final[col])
+                    
+                    df_final.drop(columns=['Filler_Ord_1', 'Filler_Ord_2'], inplace=True, errors='ignore')
+
+                elif section_name == "Positions":
+                    for col in ['Volume_Pos', 'Price_Open_Pos', 'S_L_Pos', 'T_P_Pos', 'Price_Close_Pos', 'Commission_Pos', 'Swap_Pos', 'Profit_Pos']:
+                        if col in df_final.columns:
+                            df_final[col] = pd.to_numeric(df_final[col].astype(str).str.replace(' ', '').str.replace(',', '').str.replace('–', '-').str.replace('—', '-'), errors='coerce').fillna(0)
+                    
+                    if 'Position_ID' in df_final.columns:
+                        df_final['Position_ID'] = df_final['Position_ID'].astype(str).replace('nan', '').apply(
+                            lambda x: x if x.strip() else str(uuid.uuid4())
+                        )
+
+                    if 'Time_Pos' in df_final.columns:
+                        df_final['Time_Pos'] = pd.to_datetime(df_final['Time_Pos'], format="%Y.%m.%d %H:%M:%S", errors='coerce')
+                        df_final['Time_Pos'] = df_final['Time_Pos'].fillna(pd.to_datetime(df_final['Time_Pos'].astype(str), errors='coerce'))
+                        df_final['Time_Pos'] = _ensure_utc_datetime(df_final['Time_Pos'])
+                    
+                    if 'Time_Close_Pos_Raw' in df_final.columns: 
+                        df_final['Time_Close_Pos'] = pd.to_datetime(df_final['Time_Close_Pos_Raw'], format="%Y.%m.%d %H:%M:%S", errors='coerce')
+                        df_final['Time_Close_Pos'] = df_final['Time_Close_Pos'].fillna(pd.to_datetime(df_final['Time_Close_Pos_Raw'].astype(str), errors='coerce')) 
+                        df_final['Time_Close_Pos'] = _ensure_utc_datetime(df_final['Time_Close_Pos'])
+                        df_final.drop(columns=['Time_Close_Pos_Raw'], inplace=True, errors='ignore')
+                    else: 
+                        df_final['Time_Close_Pos'] = pd.NaT 
+
+                extracted_data[section_name.lower()] = df_final.dropna(how='all')
+
+            else:
+                extracted_data[section_name.lower()] = pd.DataFrame(columns=expected_columns_map_from_settings[section_name])
+
+        except Exception as e: 
+            print(f"Error parsing {section_name} section: {e}")
+            extracted_data[section_name.lower()] = pd.DataFrame(columns=expected_columns_map_from_settings[section_name])
+
+    deals_df_processed = extracted_data.get('deals', pd.DataFrame()) 
+
+    if not deals_df_processed.empty:
+        extracted_data['results_summary']['Total_Net_Profit'] = deals_df_processed[deals_df_processed['Type_Deal'].str.lower().isin(['buy', 'sell'])]['Profit_Deal'].sum()
+        
         calculated_deposit = 0.0
         calculated_withdrawal = 0.0
         itemized_deposit_withdrawal_logs = []
-        balance_deals = deals_df_copy[deals_df_copy['Type_Deal'].str.lower() == 'balance'].copy()
+        balance_deals = deals_df_processed[deals_df_processed['Type_Deal'].str.lower() == 'balance'].copy()
+        
         for _, row in balance_deals.iterrows():
             comment = str(row.get('Comment_Deal', '')).lower()
-            profit_val = row['Profit_Deal']
+            profit_val = pd.to_numeric(row['Profit_Deal'], errors='coerce')
+            if pd.isna(profit_val):
+                profit_val = 0.0
             transaction_type = 'Unknown'
-            # ใช้กฎ D/W ที่เราสรุปกัน
+            
             if 'w' in comment or 'withdraw' in comment:
                 transaction_type = 'Withdrawal'
                 calculated_withdrawal += profit_val
@@ -339,7 +438,7 @@ def extract_data_from_report_content(file_content_input: bytes):
             if transaction_type != 'Unknown':
                 itemized_deposit_withdrawal_logs.append({
                     "TransactionID": str(row.get('Deal_ID', '')), 
-                    "DateTime": str(row.get('Time_Deal', '')), 
+                    "DateTime": str(row.get('Time_Deal', '')),
                     "Type": transaction_type, 
                     "Amount": profit_val, 
                     "Comment": row.get('Comment_Deal', '')
@@ -347,26 +446,34 @@ def extract_data_from_report_content(file_content_input: bytes):
         extracted_data['balance_summary']['Deposit'] = calculated_deposit
         extracted_data['balance_summary']['Withdrawal'] = calculated_withdrawal
 
-        # --- จุดที่แก้ไข ---
-        # แปลง list of dictionaries ให้เป็น DataFrame ที่ถูกต้องก่อนส่งต่อ
         if itemized_deposit_withdrawal_logs:
-            # ถ้ามีข้อมูล ให้สร้าง DataFrame จาก list นั้น
-            extracted_data['deposit_withdrawal_logs'] = itemized_deposit_withdrawal_logs
+            dw_df_raw = pd.DataFrame(itemized_deposit_withdrawal_logs)
+            if 'DateTime' in dw_df_raw.columns:
+                dw_df_raw['DateTime'] = pd.to_datetime(dw_df_raw['DateTime'], format="%Y.%m.%d %H:%M:%S", errors='coerce')
+                dw_df_raw['DateTime'] = dw_df_raw['DateTime'].fillna(pd.to_datetime(dw_df_raw['DateTime'].astype(str), errors='coerce'))
+                dw_df_raw['DateTime'] = _ensure_utc_datetime(dw_df_raw['DateTime'])
+            
+            if 'Amount' in dw_df_raw.columns:
+                dw_df_raw['Amount'] = pd.to_numeric(dw_df_raw['Amount'], errors='coerce').fillna(0)
+            
+            if 'id' in dw_df_raw.columns:
+                dw_df_raw.drop(columns=['id'], inplace=True, errors='ignore')
+
+            extracted_data['deposit_withdrawal_logs'] = dw_df_raw
         else:
-            # ถ้าไม่มีข้อมูล ก็ให้เป็น DataFrame ที่ว่างเปล่า
-            extracted_data['deposit_withdrawal_logs'] = pd.DataFrame()
+            extracted_data['deposit_withdrawal_logs'] = pd.DataFrame(columns=settings.WORKSHEET_HEADERS[settings.SUPABASE_TABLE_DEPOSIT_WITHDRAWAL_LOGS])
 
-    # --- 5. การตัดสินใจสุดท้าย (FINAL DECISION LOGIC) ---
-    if has_open_positions_flag:
-        pass 
-    else:
-        if extracted_data['balance_summary'].get('Balance') is None and 'deals' in extracted_data and not extracted_data['deals'].empty:
-            extracted_data['balance_summary']['Balance'] = deals_df_copy['Balance_Deal'].iloc[-1]
-        if 'Balance' in extracted_data['balance_summary']:
+    if not has_open_positions_flag:
+        current_deals_df = extracted_data.get('deals', pd.DataFrame())
+        if extracted_data['balance_summary'].get('Balance') is None and not current_deals_df.empty:
+            extracted_data['balance_summary']['Balance'] = current_deals_df['Balance_Deal'].iloc[-1]
+        
+        if 'Balance' in extracted_data['balance_summary'] and extracted_data['balance_summary'].get('Equity') is None:
              extracted_data['balance_summary']['Equity'] = extracted_data['balance_summary']['Balance']
+        elif 'Balance' in extracted_data['balance_summary'] and extracted_data['balance_summary'].get('Floating_P_L') is None:
+             extracted_data['balance_summary']['Floating_P_L'] = 0.0
 
-    # --- 6. ประกอบร่างสุดท้าย (โค้ดที่แก้ไขสมบูรณ์แล้ว) ---
-    final_summary_data = {h: 0.0 for h in settings.WORKSHEET_HEADERS[settings.WORKSHEET_STATEMENT_SUMMARIES]}
+    final_summary_data = {h: 0.0 for h in settings.WORKSHEET_HEADERS[settings.SUPABASE_TABLE_STATEMENT_SUMMARIES]}
     final_summary_data['PortfolioID'] = extracted_data['portfolio_details'].get('account_id', '')
     final_summary_data['PortfolioName'] = extracted_data['portfolio_details'].get('account_name', '')
     
@@ -378,15 +485,23 @@ def extract_data_from_report_content(file_content_input: bytes):
         elif key == 'Total_Net_Profit_Text' and 'Total_Net_Profit' not in final_summary_data: 
             final_summary_data['Total_Net_Profit'] = value
     
-    # ===================================================================
-    # ===== บรรทัดแก้ไขที่สำคัญที่สุด: บังคับให้ใส่ค่า Balance และ Equity =====
-    # ===================================================================
     if 'Balance' in extracted_data['balance_summary']:
         final_summary_data['Balance'] = extracted_data['balance_summary']['Balance']
     if 'Equity' in extracted_data['balance_summary']:
         final_summary_data['Equity'] = extracted_data['balance_summary']['Equity']
-    # ===================================================================
 
     extracted_data['final_summary_data'] = final_summary_data
     
+    print("\n--- DEBUG: Final extracted_data from statement_processor.py ---")
+    for k, v in extracted_data.items():
+        if isinstance(v, pd.DataFrame):
+            print(f"  {k} (DataFrame, shape: {v.shape}):")
+            print(v.head())
+        elif isinstance(v, list):
+            print(f"  {k} (List, len: {len(v)}):")
+            print(v[:2])
+        else:
+            print(f"  {k} (Dict/Other): {v}")
+    print("--------------------------------------------------\n")
+
     return extracted_data

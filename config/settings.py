@@ -1,36 +1,32 @@
 # config/settings.py (เวอร์ชันจัดระเบียบใหม่และแก้ไขสมบูรณ์)
-
 """
 Central configuration file for the Ultimate Chart Trade Planner.
 """
 
 # =========================================================================
-# I. GOOGLE SHEETS CONFIGURATION
+# I. SUPABASE CONFIGURATION
 # =========================================================================
+# --- Names of the Supabase Tables ---
+# (ชื่อตารางเหล่านี้ควรตรงกับชื่อตารางใน Supabase Dashboard ของคุณ)
+SUPABASE_TABLE_PORTFOLIOS = "Portfolios"
+SUPABASE_TABLE_PLANNED_LOGS = "PlannedTradeLogs"
+SUPABASE_TABLE_ACTUAL_TRADES = "ActualTrades"  # For Deals from statements
+SUPABASE_TABLE_ACTUAL_ORDERS = "ActualOrders"  # For Orders from statements
+SUPABASE_TABLE_ACTUAL_POSITIONS = "ActualPositions" # For Positions from statements
+SUPABASE_TABLE_STATEMENT_SUMMARIES = "StatementSummaries"
+SUPABASE_TABLE_UPLOAD_HISTORY = "UploadHistory"
+SUPABASE_TABLE_DEPOSIT_WITHDRAWAL_LOGS = "DepositWithdrawalLogs"
 
-# --- Names of the Google Sheet and its individual worksheets ---
-GOOGLE_SHEET_NAME = "TradeLog"
-WORKSHEET_PORTFOLIOS = "Portfolios"
-WORKSHEET_PLANNED_LOGS = "PlannedTradeLogs"
-WORKSHEET_ACTUAL_TRADES = "ActualTrades"  # For Deals from statements
-WORKSHEET_ACTUAL_ORDERS = "ActualOrders"  # For Orders from statements
-WORKSHEET_ACTUAL_POSITIONS = "ActualPositions" # For Positions from statements
-WORKSHEET_STATEMENT_SUMMARIES = "StatementSummaries"
-WORKSHEET_UPLOAD_HISTORY = "UploadHistory"
-WORKSHEET_DEPOSIT_WITHDRAWAL_LOGS = "DepositWithdrawalLogs"
-
-# --- Expected Headers for each worksheet ---
-# Used by gs_handler.py to validate and write data, ensuring data integrity.
+# --- Expected Headers for each Table ---
+# ใช้สำหรับยืนยันโครงสร้างข้อมูลที่อ่านจาก CSV และเตรียมก่อนส่งเข้า Supabase
 WORKSHEET_HEADERS = {
 
-    # Header สำหรับชีท DepositWithdrawalLogs ใหม่
-    WORKSHEET_DEPOSIT_WITHDRAWAL_LOGS: [
+    SUPABASE_TABLE_DEPOSIT_WITHDRAWAL_LOGS: [
         "TransactionID", "DateTime", "Type", "Amount", "PortfolioID", "PortfolioName",
         "SourceFile", "ImportBatchID", "Comment"
     ],
 
-    # ใช้โครงสร้างที่สมบูรณ์และถูกต้องที่สุดสำหรับ Portfolios (เหลือแค่ครั้งเดียว)
-    WORKSHEET_PORTFOLIOS: [
+    SUPABASE_TABLE_PORTFOLIOS: [
         'PortfolioID', 'PortfolioName', 'ProgramType', 'EvaluationStep',
         'Status', 'InitialBalance', 'CreationDate', 'Notes',
         'ProfitTargetPercent', 'DailyLossLimitPercent', 'TotalStopoutPercent',
@@ -45,33 +41,41 @@ WORKSHEET_HEADERS = {
         'AccountType'
     ],
 
-    # ใช้โครงสร้างที่ถูกต้องสำหรับ PlannedTradeLogs (เหลือแค่ครั้งเดียว)
-    WORKSHEET_PLANNED_LOGS: [
+    SUPABASE_TABLE_PLANNED_LOGS: [
         "LogID", "PortfolioID", "PortfolioName", "Timestamp", "Asset", "Mode",
         "Direction", "Risk %", "Fibo Level", "Entry", "SL", "TP", "Lot", "Risk $", "RR"
     ],
 
-    WORKSHEET_ACTUAL_TRADES: [
+    SUPABASE_TABLE_ACTUAL_TRADES: [
         "Time_Deal", "Deal_ID", "Symbol_Deal", "Type_Deal", "Direction_Deal", "Volume_Deal",
         "Price_Deal", "Order_ID_Deal", "Commission_Deal", "Fee_Deal", "Swap_Deal",
         "Profit_Deal", "Balance_Deal", "Comment_Deal", "PortfolioID", "PortfolioName",
         "SourceFile", "ImportBatchID"
     ],
 
-    WORKSHEET_ACTUAL_ORDERS: [
-        "Open_Time_Ord", "Order_ID_Ord", "Symbol_Ord", "Type_Ord", "Volume_Ord", "Price_Ord", "S_L_Ord",
-        "T_P_Ord", "Close_Time_Ord", "State_Ord", "Comment_Ord", "PortfolioID", "PortfolioName",
-        "SourceFile", "ImportBatchID"
+    # --- แก้ไขสำหรับ Orders: เพิ่มคอลัมน์ที่หายไป (เช่น Unnamed) ให้ Pandas อ่านได้, เพิ่ม Volume_Ord_Clean ---
+    # ตาม Header ที่ให้มา: Open Time,Order,Symbol,Type,Volume,Price,S / L,T / P,Time,State,,Comment,,
+    SUPABASE_TABLE_ACTUAL_ORDERS: [
+        "Open_Time_Ord", "Order_ID_Ord", "Symbol_Ord", "Type_Ord", "Volume_Ord_Raw", # Original raw volume with " / "
+        "Price_Ord", "S_L_Ord", "T_P_Ord", "Close_Time_Ord", "State_Ord",
+        "Filler_Ord_1", "Comment_Ord", "Filler_Ord_2", # These map to ,, in CSV header
+        "PortfolioID", "PortfolioName", "SourceFile", "ImportBatchID",
+        "Volume_Ord" # Cleaned volume from Volume_Ord_Raw (will be added in processor)
     ],
+    # --- สิ้นสุดการแก้ไข Orders ---
 
-    WORKSHEET_ACTUAL_POSITIONS: [
+    # --- แก้ไขสำหรับ Positions: ปรับชื่อคอลัมน์ให้ตรงและเพิ่มคอลัมน์ที่หายไป ---
+    # ตาม Header ที่ให้มา: Time,Position,Symbol,Type,Volume,Price,S / L,T / P,Time,Price,Commission,Swap,Profit,
+    SUPABASE_TABLE_ACTUAL_POSITIONS: [
         "Time_Pos", "Position_ID", "Symbol_Pos", "Type_Pos", "Volume_Pos", "Price_Open_Pos", "S_L_Pos",
-        "T_P_Pos", "Time_Close_Pos", "Price_Close_Pos", "Commission_Pos", "Swap_Pos", "Profit_Pos",
-        "Comment_Pos", "PortfolioID", "PortfolioName", "SourceFile", "ImportBatchID"
+        "T_P_Pos", "Time_Close_Pos_Raw", # This maps to the second 'Time' in CSV header
+        "Price_Close_Pos", "Commission_Pos", "Swap_Pos", "Profit_Pos",
+        "PortfolioID", "PortfolioName", "SourceFile", "ImportBatchID",
+        "Time_Close_Pos" # Cleaned close time from Time_Close_Pos_Raw (will be added in processor)
     ],
+    # --- สิ้นสุดการแก้ไข Positions ---
 
-    # Header สำหรับ StatementSummaries ที่สมบูรณ์แบบ
-    WORKSHEET_STATEMENT_SUMMARIES: [
+    SUPABASE_TABLE_STATEMENT_SUMMARIES: [
         "ImportBatchID", "Timestamp", "PortfolioID", "PortfolioName", "SourceFile", "ClientName",
         "Balance", "Equity", "Free_Margin", "Margin", "Floating_P_L", "Margin_Level",
         "Credit_Facility", "Deposit", "Withdrawal", "Gross_Profit", "Gross_Loss",
@@ -92,10 +96,39 @@ WORKSHEET_HEADERS = {
         "Average_Consecutive_Wins", "Average_Consecutive_Losses"
     ],
 
-    WORKSHEET_UPLOAD_HISTORY: [
+    SUPABASE_TABLE_UPLOAD_HISTORY: [
         "UploadTimestamp", "PortfolioID", "PortfolioName", "FileName", "FileSize",
         "FileHash", "Status", "ImportBatchID", "Notes"
     ]
+}
+
+WORKSHEET_HEADERS_MAPPER = {
+    "deals": "ActualTrades",
+    "orders": "ActualOrders",
+    "positions": "ActualPositions",
+    "deposit_withdrawal_logs": "DepositWithdrawalLogs",
+    "deals": "ActualTrades",
+    "orders": "ActualOrders",
+    "positions": "ActualPositions",
+    "deposit_withdrawal_logs": "DepositWithdrawalLogs",
+}
+
+
+
+# --- Expected Raw Headers for parsing sections in CSV files ---
+# These are used to locate the start of data tables within the raw CSV content.
+# They MUST match the actual headers in your CSV file EXACTLY.
+SECTION_RAW_HEADERS_STATEMENT_PARSING = {
+    # Positions Header: Time,Position,Symbol,Type,Volume,Price,S / L,T / P,Time,Price,Commission,Swap,Profit,
+    # Note the trailing comma, and the space around "S / L", "T / P"
+    "Positions": "Time,Position,Symbol,Type,Volume,Price,S / L,T / P,Time,Price,Commission,Swap,Profit,",
+    
+    # Orders Header: Open Time,Order,Symbol,Type,Volume,Price,S / L,T / P,Time,State,,Comment,,
+    # Note the multiple trailing commas, and the empty headers (,,)
+    "Orders": "Open Time,Order,Symbol,Type,Volume,Price,S / L,T / P,Time,State,,Comment,,",
+    
+    # Deals Header: Time,Deal,Symbol,Type,Direction,Volume,Price,Order,Commission,Fee,Swap,Profit,Balance,Comment
+    "Deals": "Time,Deal,Symbol,Type,Direction,Volume,Price,Order,Commission,Fee,Swap,Profit,Balance,Comment"
 }
 
 # =========================================================================
@@ -112,7 +145,6 @@ DEFAULT_MAX_RISK_PERCENT = 5.0
 # =========================================================================
 # III. TRADING LOGIC CONSTANTS
 # =========================================================================
-
 # Fibonacci Ratios for Entry Levels (from main (1).py SEC 2.1)
 FIBO_LEVELS_DEFINITIONS = [0.114, 0.25, 0.382, 0.5, 0.618]
 
@@ -121,42 +153,8 @@ RATIO_TP1_EFF = 1.618
 RATIO_TP2_EFF = 2.618
 RATIO_TP3_EFF = 4.236
 
-
 # =========================================================================
-# IV. STATEMENT PARSING TEMPLATES
-#     Structural templates for interpreting raw statement report files.
-#     Used by statement_processor.py.
-# =========================================================================
-
-# Raw text headers used to identify the start of data sections in the CSV file.
-SECTION_RAW_HEADERS_STATEMENT_PARSING = {
-    "Positions": "Time,Position,Symbol,Type,Volume,Price,S / L,T / P,Time,Price,Commission,Swap,Profit",
-    "Orders": "Open Time,Order,Symbol,Type,Volume,Price,S / L,T / P,Time,State,,Comment",
-    "Deals": "Time,Deal,Symbol,Type,Direction,Volume,Price,Order,Commission,Fee,Swap,Profit,Balance,Comment"
-}
-
-# Defines the final column names for the pandas DataFrames after parsing.
-EXPECTED_CLEANED_COLUMNS_STATEMENT_PARSING = {
-    "Positions": [
-        "Time_Pos", "Position_ID", "Symbol_Pos", "Type_Pos", "Volume_Pos", "Price_Open_Pos",
-        "S_L_Pos", "T_P_Pos", "Time_Close_Pos", "Price_Close_Pos", "Commission_Pos",
-        "Swap_Pos", "Profit_Pos", "Trailing_Empty_Pos"
-    ],
-
-    "Orders": [
-        "Open_Time_Ord", "Order_ID_Ord", "Symbol_Ord", "Type_Ord", "Volume_Ord", "Price_Ord",
-        "S_L_Ord", "T_P_Ord", "Close_Time_Ord", "State_Ord", "Unnamed_Ord", "Comment_Ord"
-    ],
-    "Deals": [
-        "Time_Deal", "Deal_ID", "Symbol_Deal", "Type_Deal", "Direction_Deal", "Volume_Deal",
-        "Price_Deal", "Order_ID_Deal", "Commission_Deal", "Fee_Deal", "Swap_Deal",
-        "Profit_Deal", "Balance_Deal", "Comment_Deal"
-    ]
-}
-
-# =========================================================================
-# V. ASSET SPECIFICATIONS FOR LOT/RISK CALCULATION
-#    Values derived from MT5 contract specifications for accurate lot sizing.
+# IV. ASSET SPECIFICATIONS FOR LOT/RISK CALCULATION
 # =========================================================================
 ASSET_SPECIFICATIONS = {
     "STANDARD": { # Symbol สำหรับบัญชี STANDARD
@@ -211,7 +209,7 @@ ASSET_SPECIFICATIONS = {
             "tick_value_per_tick_per_lot": 0.01 # (ประเมิน)
         },
     },
-    "PROP_FIRM": { # <<<< คัดลอกมาจาก STANDARD เพื่อให้เหมือนกัน >>>>
+    "PROP_FIRM": { 
         "XAUUSD": {
             "tick_size": 0.01,
             "tick_value_per_tick_per_lot": 1.5427
@@ -250,3 +248,10 @@ ASSET_SPECIFICATIONS = {
         },
     },
 }
+# =========================================================================
+# V. SUPABASE API CONFIGURATION (เพิ่มส่วนนี้เข้าไป)
+# =========================================================================
+# IMPORTANT: Replace these with your actual Supabase Project URL and Public API Key
+# You can find these in your Supabase project dashboard under Project Settings > API
+SUPABASE_URL = "https://xmqriscinxccbdggmtnb.supabase.co"    
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhtcXJpc2NpbnhjY2JkZ2dtdG5iIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MTEyMjU3MywiZXhwIjoyMDY2Njk4NTczfQ.YUX36ML3CZmya4h3CJSuZvlRjinbsPX3yTWBTduJc88" 
