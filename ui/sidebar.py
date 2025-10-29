@@ -92,10 +92,10 @@ def render_sidebar():
             # --- ส่วน Input ---
             
             # ดึงค่า Balance ปัจจุบันมาเป็นค่าเริ่มต้น
-            default_balance = st.session_state.get('current_account_balance', 25000.0)
+            default_balance = st.session_state.get('current_account_balance', 100000.0)
             # ถ้าค่าที่ได้มาน้อยกว่า 1.0 ให้ใช้ค่าเริ่มต้น 25000 แทน
             if default_balance < 1.0:
-                default_balance = 25000.0
+                default_balance = 100000.0
             
             risk_calc_balance = st.number_input(
                 "ยอดเงินในบัญชี ($)",
