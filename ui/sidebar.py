@@ -138,64 +138,75 @@ def render_sidebar():
         # --- END: สิ้นสุดโค้ดสำหรับ Risk Sizing Calculator ---
 
 
-        # --- START: โค้ดสำหรับ Profit Consistency Calculator (เวอร์ชันสมบูรณ์) ---
+        # --- START: โค้ดที่แก้ไขแล้วสำหรับ Profit Consistency Calculator ---
         st.markdown("---")
-        st.subheader("🧮 Consistency Calculate")
-        
-        # --- ตั้งค่าเริ่มต้นใน session_state ---
-        default_values = {
-            'consistency_initial_balance': 25000.0,
-            'consistency_profit_target_pct': 10.0,
-            'consistency_total_pl': 0.0,
-            'consistency_percent': 0.0,
-            'consistency_rule_threshold': 19,
-            'consistency_daily_target': 300.0
-        }
-        for key, value in default_values.items():
-            if key not in st.session_state:
-                st.session_state[key] = value
+        st.subheader("🧮 Prop Firm Tools")
 
-        # --- สร้าง Widgets ---
-        with st.expander("Challenge & Status Inputs", expanded=True):
-            st.number_input(
-                label="ทุนเริ่มต้น ($) (Initial Balance)",
-                help="ใส่จำนวนเงินทุนเริ่มต้นของ Challenge",
-                min_value=1.0,
-                key='consistency_initial_balance'
-            )
-            st.number_input(
-                label="เป้าหมายกำไรของ Challenge (%)",
-                help="ใส่เปอร์เซ็นต์กำไรที่ Challenge กำหนด (เช่น 8 หรือ 10)",
-                min_value=1.0,
-                key='consistency_profit_target_pct'
-            )
-            st.number_input(
-                label="กำไร/ขาดทุนโดยรวม (Total P/L)",
-                help="ใส่ตัวเลขจาก Dashboard (ถ้าขาดทุนให้ใส่ค่าติดลบ)",
-                key='consistency_total_pl',
-                format="%.2f"
-            )
-            st.number_input(
-                label="ความสม่เสมอของผลกำไร (%)",
-                help="ใส่ตัวเลขเปอร์เซ็นต์จาก Dashboard (ถ้ายังไม่มีกำไร ให้ใส่ 0)",
-                min_value=0.0,
-                format="%.2f",
-                key='consistency_percent'
-            )
+        with st.expander("Profit Consistency Calculator", expanded=True): # ตั้งเป็น expanded=True เพื่อให้เห็นง่ายขึ้น
             
-            options_consistency = [19, 20, 30, 40, 50] 
-            st.selectbox(
-                label="เกณฑ์ของกฎ Consistency (%)",
-                options=options_consistency,
-                key='consistency_rule_threshold' 
-            )
+            # --- ข้อมูลสำหรับ Challenge ---
+            st.markdown("**1. Challenge Setup**")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.session_state['consistency_initial_balance'] = st.number_input(
+                    "Initial Balance ($)",
+                    min_value=1.0,
+                    value=st.session_state.get('consistency_initial_balance', 100000.0),
+                    step=1000.0,
+                    format="%.2f"
+                )
+            with col_b:
+                st.session_state['consistency_profit_target_pct'] = st.number_input(
+                    "Profit Target (%)",
+                    min_value=1.0,
+                    value=st.session_state.get('consistency_profit_target_pct', 10.0),
+                    step=1.0,
+                    format="%.1f"
+                )
 
-        with st.expander("Scenario Simulator", expanded=True):
-            st.number_input(
-                label="เป้าหมายกำไรต่อวัน ($)",
-                help="ใส่จำนวนเงินที่คุณคาดว่าจะทำกำไรได้ต่อวัน เพื่อคำนวณระยะเวลา",
-                min_value=1.0,
-                key='consistency_daily_target'
-            )
-        # --- END: สิ้นสุดโค้ดที่เพิ่มเข้ามา ---
-        
+            # --- ข้อมูลปัจจุบันจาก Dashboard ---
+            st.markdown("**2. Current Dashboard Stats**")
+            col_c, col_d = st.columns(2)
+            with col_c:
+                st.session_state['consistency_total_pl'] = st.number_input(
+                    "Current Total P/L ($)",
+                    value=st.session_state.get('consistency_total_pl', 0.00),
+                    format="%.2f"
+                )
+            with col_d:
+                st.session_state['consistency_percent'] = st.number_input(
+                    "Current Consistency (%)",
+                    value=st.session_state.get('consistency_percent', 0.0),
+                    min_value=0.0,
+                    format="%.2f"
+                )
+            
+            # --- การตั้งค่ากฎและเป้าหมายรายวัน ---
+            st.markdown("**3. Rule & Daily Target**")
+            col_e, col_f = st.columns(2)
+            with col_e:
+                # --- นี่คือส่วนที่แก้ไขแล้ว ---
+                options_consistency = [19.99, 30, 40, 50]
+                try:
+                    current_value = st.session_state.get('consistency_rule_threshold', 19.99)
+                    current_index = options_consistency.index(current_value)
+                except ValueError:
+                    current_index = 1 # Default to 30% if value not found
+
+                st.session_state['consistency_rule_threshold'] = st.selectbox(
+                    label="เกณฑ์ของกฎ (%)",
+                    options=options_consistency,
+                    index=current_index
+                )
+                # --- สิ้นสุดส่วนที่แก้ไข ---
+            with col_f:
+                st.session_state['consistency_daily_target'] = st.number_input(
+                    label="เป้าหมายกำไรต่อวัน ($)",
+                    min_value=0.0,
+                    value=st.session_state.get('consistency_daily_target', 300.0),
+                    step=50.0,
+                    format="%.2f",
+                    help="ใช้สำหรับจำลองสถานการณ์ใน Simulator"
+                )
+
+        # --- END: สิ้นสุดโค้ดที่แก้ไขแล้ว ---
