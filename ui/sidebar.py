@@ -199,14 +199,6 @@ def render_sidebar():
                     index=current_index
                 )
                 # --- สิ้นสุดส่วนที่แก้ไข ---
-            with col_f:
-                st.session_state['consistency_daily_target'] = st.number_input(
-                    label="เป้าหมายกำไรต่อวัน ($)",
-                    min_value=0.0,
-                    value=st.session_state.get('consistency_daily_target', 300.0),
-                    step=50.0,
-                    format="%.2f",
-                    help="ใช้สำหรับจำลองสถานการณ์ใน Simulator"
-                )
+            
 
         # --- END: สิ้นสุดโค้ดที่แก้ไขแล้ว ---
