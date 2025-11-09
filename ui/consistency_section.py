@@ -8,7 +8,7 @@ def render_consistency_section():
     แสดงผล Section สำหรับเครื่องมือวิเคราะห์ Profit Consistency
     *** อัปเกรด: แสดง 'กำไรที่ต้องทำเพิ่ม' ใน Simulator อย่างชัดเจน ***
     """
-    with st.expander("🎯 Profit Consistency Analysis & Plan", expanded=True):
+    with st.expander("🎯 Profit Consistency Analysis & Plan", expanded=False):
         
         # --- 1. ดึงข้อมูลทั้งหมดจาก Sidebar ---
         initial_balance = st.session_state.get('consistency_initial_balance', 1.0)

@@ -20,7 +20,9 @@ from ui import (
     statement_section,
     ai_section,
     consistency_section,
-    edge_score_section 
+    edge_score_section,
+    topstep_section,
+    checklist_section  
 )
 
 # ============================== SESSION STATE INITIALIZATION ==============================
@@ -52,6 +54,7 @@ def initialize_session_state():
 def main():
     """Main function to run the Streamlit application."""
     initialize_session_state()
+    supabase_client = db_handler.get_supabase_client()
     df_portfolios_gs = db_handler.load_portfolios()  
     
     if not st.session_state.initial_portfolio_setup_done and not df_portfolios_gs.empty:
@@ -128,8 +131,13 @@ def main():
     #        st.session_state[f"summary_shown_{datetime.now().isocalendar().week}"] = True
 
     with st.container():
+        if hasattr(checklist_section, 'render_checklist_section'):
+            checklist_section.render_checklist_section(supabase_client)
+        if hasattr(topstep_section, 'render_topstep_section'):
+            topstep_section.render_topstep_section()    
+        st.divider()      
         if hasattr(consistency_section, 'render_consistency_section'):
-            consistency_section.render_consistency_section()   
+            consistency_section.render_consistency_section()
         if hasattr(edge_score_section, 'render_edge_score_section'):
             edge_score_section.render_edge_score_section(analytics_engine, db_handler)      
         if hasattr(portfolio_section, 'render_portfolio_manager_expander'):

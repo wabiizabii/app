@@ -435,7 +435,7 @@ def render_portfolio_manager_expander(db_handler, df_portfolios):
     """
     Renders the main expander and tabs for portfolio management.
     """
-    with st.expander("💼 Portfolio Manager (Dashboard/Add/Edit)", expanded=True):
+    with st.expander("💼 Portfolio Manager (Dashboard/Add/Edit)", expanded=False):
         
         tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "➕ Add New Portfolio", "✏️ Edit/Delete Portfolio"])
 

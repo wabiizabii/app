@@ -255,3 +255,73 @@ ASSET_SPECIFICATIONS = {
 # You can find these in your Supabase project dashboard under Project Settings > API
 SUPABASE_URL = "https://xmqriscinxccbdggmtnb.supabase.co"    
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhtcXJpc2NpbnhjY2JkZ2dtdG5iIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MTEyMjU3MywiZXhwIjoyMDY2Njk4NTczfQ.YUX36ML3CZmya4h3CJSuZvlRjinbsPX3yTWBTduJc88" 
+
+# --- START: เพิ่มข้อมูลสำหรับ Futures Calculator ---
+FUTURES_TICK_VALUES = {
+    # Indices
+    "ES": 12.50,  # E-mini S&P 500
+    "MES": 1.25,   # Micro E-mini S&P 500
+    "NQ": 5.00,   # E-mini NASDAQ 100
+    "MNQ": 0.50,   # Micro E-mini NASDAQ 100
+    "YM": 5.00,   # E-mini Dow Jones
+    "MYM": 0.50,   # Micro E-mini Dow Jones
+    
+    # Energies
+    "CL": 10.00,  # Crude Oil
+    "MCL": 1.00,   # Micro Crude Oil
+    
+    # Metals
+    "GC": 10.00,  # Gold
+    "MGC": 1.00,   # Micro Gold
+}
+# --- END: สิ้นสุดข้อมูลที่เพิ่ม ---
+
+# --- START: เพิ่มข้อมูล Tick Size สำหรับคำนวณอัตโนมัติ ---
+FUTURES_TICK_SIZES = {
+    # Indices
+    "ES": 0.25, "MES": 0.25, "NQ": 0.25, "MNQ": 0.25,
+    "YM": 1.00, "MYM": 1.00, "RTY": 0.10, "M2K": 0.10,
+
+    # Energies
+    "CL": 0.01, "MCL": 0.01, "NG": 0.001,
+
+    # Metals
+    "GC": 0.10, "MGC": 0.10, "SI": 0.005, "SIL": 0.005,
+
+    # Currencies
+    "6E": 0.00005,
+}
+# --- END: สิ้นสุดข้อมูลที่เพิ่ม ---
+
+ACCOUNT_RULES = {
+    "50K Buying Power": {
+        "start_balance": 50000.0,
+        "profit_target": 3000.0,
+        "max_loss_limit": 2000.0,
+        "daily_loss_limit": 1000.0,
+        "max_contracts_std": 5, # <-- ตรวจสอบให้แน่ใจว่าเป็นชื่อนี้
+        "scaling_level_1": 51500.0,
+        "scaling_contracts_1": 2,
+        "scaling_contracts_2": 3,
+    },
+    "100K Buying Power": {
+        "start_balance": 100000.0,
+        "profit_target": 6000.0,
+        "max_loss_limit": 3000.0,
+        "daily_loss_limit": 2000.0,
+        "max_contracts_std": 10, # <-- ตรวจสอบให้แน่ใจว่าเป็นชื่อนี้
+        "scaling_level_1": 102000.0,
+        "scaling_contracts_1": 4,
+        "scaling_contracts_2": 6,
+    },
+    "150K Buying Power": {
+        "start_balance": 150000.0,
+        "profit_target": 9000.0,
+        "max_loss_limit": 4500.0,
+        "daily_loss_limit": 3000.0,
+        "max_contracts_std": 15, # <-- ตรวจสอบให้แน่ใจว่าเป็นชื่อนี้
+        "scaling_level_1": 152500.0,
+        "scaling_contracts_1": 6,
+        "scaling_contracts_2": 9,
+    }
+}

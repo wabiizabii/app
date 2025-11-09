@@ -7,7 +7,7 @@ def render_edge_score_section(analytics_engine, db_handler):
     """
     แสดงผล Dashboard สำหรับติดตาม Metrics ที่เกี่ยวข้องกับ Edge Score
     """
-    with st.expander("🚀 My Edge Score Dashboard", expanded=True):
+    with st.expander("🚀 My Edge Score Dashboard", expanded=False):
         
         active_id = st.session_state.get('active_portfolio_id_gs')
         if not active_id:

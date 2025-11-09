@@ -1,8 +1,11 @@
+# Core Libraries
 streamlit
 pandas
 supabase
 numpy
 pytz
+
+# Optional / Specific Feature Libraries
 altair
 pyarrow
 GitPython

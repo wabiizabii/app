@@ -13,7 +13,7 @@ def render_statement_section():
     แสดงผล Section การอัปโหลดไฟล์ Statement ที่เรียบง่าย
     *** อัปเกรด: ใช้ Active Portfolio จาก Sidebar โดยตรง ***
     """
-    with st.expander("⬆️ Upload Trading Statement", expanded=True):
+    with st.expander("⬆️ Upload Trading Statement", expanded=False):
 
         # --- 1. ดึง Active Portfolio จาก session_state ---
         active_portfolio_id = st.session_state.get('active_portfolio_id_gs')
