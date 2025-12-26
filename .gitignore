@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# virtualenvs
+venv/
+.venv/
+
+# Streamlit local config
+.streamlit/
+
+# local database & logs
+*.db
+*.sqlite
+*.csv
+*.log
+trade_log.csv
+ultimate_chart.db
+
+# IDE/editor
+.vscode/
+.idea/
+scaling.py
+
+# Ignore history files
+.history/
