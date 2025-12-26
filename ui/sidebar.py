@@ -51,10 +51,8 @@ def render_sidebar():
             st.session_state['active_portfolio_id_gs'] = None
         
         def handle_portfolio_selection():
-            # 1. ใช้ .get() เพื่อป้องกัน AttributeError ถ้าค่าหายไปจะกลายเป็น None แทน
+            # ใช้ .get() เพื่อความปลอดภัย
             selected_name = st.session_state.get('sidebar_portfolio_selector')
-
-            # 2. ถ้าหาค่าไม่เจอ หรือเป็นค่าว่าง ให้หยุดทำงานทันที (ป้องกันแอปพัง)
             if not selected_name or selected_name == "-- Please select a portfolio --":
                 return
 
@@ -62,11 +60,10 @@ def render_sidebar():
 
             if st.session_state.get('active_portfolio_id_gs') != new_active_id:
                 st.session_state['active_portfolio_id_gs'] = new_active_id
-                st.session_state['active_portfolio_name_gs'] = selected_name if new_active_id else ""
-                
-                # ล้างค่าเก่าเพื่อให้หน้าหลักโหลดใหม่
+                st.session_state['active_portfolio_name_gs'] = selected_name
+                # ล้างค่าเก่าทิ้งเพื่อให้มันโหลดใหม่
                 st.session_state['current_account_balance'] = None 
-                st.session_state['current_portfolio_details'] = None 
+                st.session_state['active_profit_target_pct'] = None
 
         st.selectbox(
             "Select Portfolio:", 
@@ -76,20 +73,25 @@ def render_sidebar():
             on_change=handle_portfolio_selection
         )
         
-        # --- START: แก้ไขส่วนนี้ทั้งหมด ---
+        # --- START: แก้ไขส่วนนี้ทั้งหมด (ดึงข้อมูลตรงจาก DataFrame) ---
         
-        # 1. ดึงค่า "ที่ถูกต้อง" จาก session_state ที่ app.py คำนวณไว้ให้
-        active_balance_to_use = st.session_state.get('current_account_balance', settings.DEFAULT_ACCOUNT_BALANCE)
-        active_id = st.session_state.get('active_portfolio_id_gs') # ดึง active_id อีกครั้งเผื่อมีการเปลี่ยนแปลง
+        # ตั้งค่าเริ่มต้นเผื่อไว้
+        active_balance_to_use = settings.DEFAULT_ACCOUNT_BALANCE
+        active_profit_target_pct = 10.0
+        active_id = st.session_state.get('active_portfolio_id_gs')
 
-        # 2. ดึงค่า Profit Target จาก portfolio_details ที่ app.py โหลดมาให้
-        current_details = st.session_state.get('current_portfolio_details')
-        active_profit_target_pct = 10.0 # ค่า Default
-        if current_details:
-            profit_target = current_details.get('ProfitTargetPercent')
-            active_profit_target_pct = safe_float_convert(profit_target, 10.0)
-        
-        # --- END: สิ้นสุดการแก้ไข ---
+        # ถ้ามีการเลือกพอร์ต ให้ไปหยิบเลขจากตาราง df_portfolios มาโชว์ทันที
+        if active_id and not df_portfolios.empty:
+            # หาแถวข้อมูลที่ ID ตรงกัน
+            row = df_portfolios[df_portfolios['PortfolioID'] == active_id]
+            if not row.empty:
+                active_balance_to_use = safe_float_convert(row.iloc[0].get('InitialBalance'), settings.DEFAULT_ACCOUNT_BALANCE)
+                active_profit_target_pct = safe_float_convert(row.iloc[0].get('ProfitTargetPercent'), 10.0)
+                
+                # อัปเดตค่าเข้าหน่วยความจำเพื่อให้ Widget ด้านล่างเห็นเลขเดียวกัน
+                st.session_state['current_account_balance'] = active_balance_to_use
+                st.session_state['active_profit_target_pct'] = active_profit_target_pct
+
 
         st.markdown("---")
         st.subheader("💰 Balance for Calculation")
