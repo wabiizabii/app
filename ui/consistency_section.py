@@ -124,30 +124,27 @@ def render_planning_section(initial_balance, profit_target_pct, rule_threshold, 
     st.warning(f"**กฎเหล็กของคุณ (Your Speed Limit):** เพื่อให้แผนนี้สำเร็จ ห้ามทำกำไรเกิน **${safe_speed_limit:,.2f}** ต่อวัน")
 
 # ==============================================================================
-#                          ฟังก์ชันหลักที่เรียกใช้งาน
+#                          ฟังก์ชันหลักที่เรียกใช้งาน (แก้ไขแล้ว)
 # ==============================================================================
 
 def render_consistency_section():
     with st.expander("📅 Profit Consistency Planner & Analyzer", expanded=True):
         
-        # --- START: โค้ดส่วนดึงข้อมูลที่เรียบง่ายที่สุด ---
+        # 1. ดึงค่าจาก Sidebar (ต้องใช้ Key ให้ตรงกับใน ui/sidebar.py)
+        # ใช้ 'sidebar_con_balance' แทน 'consistency_initial_balance'
+        initial_balance = st.session_state.get('sidebar_con_balance', 
+                          st.session_state.get('current_account_balance', 10000.0))
         
-        # 1. ดึงค่าจาก session_state ที่ Sidebar ตั้งไว้ให้
-        initial_balance_from_sidebar = st.session_state.get('active_initial_balance', 10000.0)
-        profit_target_from_sidebar = st.session_state.get('active_profit_target_pct', 10.0)
-
-        # 2. นำค่าที่ดึงมาไปใส่ใน Widget ต่างๆ (ส่วนนี้จะอยู่ใน Sidebar)
-        #    ดังนั้น ใน Section นี้ เราแค่ต้อง "อ่าน" ค่าสุดท้ายที่ถูกบันทึกไว้
+        # ใช้ 'sidebar_con_target_pct' แทน 'consistency_profit_target_pct'
+        profit_target_pct = st.session_state.get('sidebar_con_target_pct', 
+                            st.session_state.get('active_profit_target_pct', 10.0))
         
-        initial_balance = st.session_state.get('consistency_initial_balance', initial_balance_from_sidebar)
-        profit_target_pct = st.session_state.get('consistency_profit_target_pct', profit_target_from_sidebar)
-        total_pl = st.session_state.get('consistency_total_pl', 0.0)
-        consistency_percent = st.session_state.get('consistency_percent', 0.0)
-        rule_threshold = st.session_state.get('consistency_rule_threshold', 19.99)
+        # ส่วนอื่นๆ ให้ตรงกับ Sidebar
+        total_pl = st.session_state.get('sidebar_con_total_pl', 0.0)
+        consistency_percent = st.session_state.get('sidebar_con_consistency_pct', 0.0)
+        rule_threshold = st.session_state.get('sidebar_con_rule', 19.99)
         
-        # --- END: สิ้นสุดโค้ดส่วนดึงข้อมูล ---
-        
-        # --- Logic การสลับโหมด (ไม่มีการเปลี่ยนแปลง) ---
+        # --- Logic การสลับโหมด (คงเดิม) ---
         if total_pl > 0:
             render_analysis_section(initial_balance, profit_target_pct, total_pl, consistency_percent, rule_threshold)
         else:
