@@ -51,15 +51,22 @@ def render_sidebar():
             st.session_state['active_portfolio_id_gs'] = None
         
         def handle_portfolio_selection():
-            selected_name = st.session_state.sidebar_portfolio_selector
+            # 1. ใช้ .get() เพื่อป้องกัน AttributeError ถ้าค่าหายไปจะกลายเป็น None แทน
+            selected_name = st.session_state.get('sidebar_portfolio_selector')
+
+            # 2. ถ้าหาค่าไม่เจอ หรือเป็นค่าว่าง ให้หยุดทำงานทันที (ป้องกันแอปพัง)
+            if not selected_name or selected_name == "-- Please select a portfolio --":
+                return
+
             new_active_id = portfolio_options.get(selected_name)
 
             if st.session_state.get('active_portfolio_id_gs') != new_active_id:
                 st.session_state['active_portfolio_id_gs'] = new_active_id
                 st.session_state['active_portfolio_name_gs'] = selected_name if new_active_id else ""
+                
+                # ล้างค่าเก่าเพื่อให้หน้าหลักโหลดใหม่
+                st.session_state['current_account_balance'] = None 
                 st.session_state['current_portfolio_details'] = None 
-                st.session_state['latest_statement_equity'] = None
-                st.session_state['active_profit_target_pct'] = None
 
         st.selectbox(
             "Select Portfolio:", 
