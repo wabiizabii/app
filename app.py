@@ -134,8 +134,7 @@ def main():
         if hasattr(checklist_section, 'render_checklist_section'):
             checklist_section.render_checklist_section(supabase_client)
         if hasattr(topstep_section, 'render_topstep_section'):
-            topstep_section.render_topstep_section()    
-        st.divider()      
+            topstep_section.render_topstep_section()          
         if hasattr(consistency_section, 'render_consistency_section'):
             consistency_section.render_consistency_section()
         if hasattr(edge_score_section, 'render_edge_score_section'):
