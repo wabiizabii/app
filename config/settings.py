@@ -325,3 +325,12 @@ ACCOUNT_RULES = {
         "scaling_contracts_2": 9,
     }
 }
+# --- START: เพิ่มข้อมูลสำหรับ Forex/CFD Calculator ---
+FOREX_POINT_VALUES = {
+    "XAUUSD": 1.0,
+    "EURUSD": 10.0,
+    "GBPUSD": 10.0,
+    "US30": 1.0,
+    "NAS100": 1.0,
+}
+# --- END ---
