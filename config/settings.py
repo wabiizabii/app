@@ -325,12 +325,11 @@ ACCOUNT_RULES = {
         "scaling_contracts_2": 9,
     }
 }
-# --- START: เพิ่มข้อมูลสำหรับ Forex/CFD Calculator ---
 FOREX_POINT_VALUES = {
-    "XAUUSD": 1.0,
-    "EURUSD": 10.0,
-    "GBPUSD": 10.0,
-    "US30": 1.0,
-    "NAS100": 1.0,
+    # (มูลค่ากำไร/ขาดทุนต่อ 1 Lot เมื่อราคาขยับ 1.0 หน่วย)
+    "XAUUSD": 100.0,  # 1 Standard Lot = 100 oz. ดังนั้นราคาขยับ $1 = $100 P/L
+    "US30": 1.0,    # สำหรับโบรกเกอร์ส่วนใหญ่ 1 point move = $1 P/L per Lot
+    "NAS100": 1.0,    # สำหรับโบรกเกอร์ส่วนใหญ่ 1 point move = $1 P/L per Lot
+    "EURUSD": 100000.0, # 1 Standard Lot = 100,000 EUR. ราคาขยับ 1.0 (เช่น 1.08 -> 2.08) = $100,000 P/L
+    "GBPUSD": 100000.0, # 1 Standard Lot = 100,000 GBP.
 }
-# --- END ---
