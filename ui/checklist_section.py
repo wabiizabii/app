@@ -6,115 +6,19 @@ from supabase import Client
 from datetime import datetime
 
 # ==============================================================================
-#                      COMPONENT: CALCULATOR (เวอร์ชันเดิมที่ใช้งานได้)
-# ==============================================================================
-def render_calculator():
-    """แสดงผลเครื่องคิดเลข (Standard Version)"""
-    
-    # --- 1. State Management ---
-    if 'calc_display' not in st.session_state:
-        st.session_state.calc_display = "0"
-    if 'calc_input' not in st.session_state:
-        st.session_state.calc_input = "0"
-
-    # --- 2. Logic Functions ---
-    def handle_input(char):
-        # ถ้าหน้าจอเป็น 0 และไม่ได้กดจุด ให้แทนที่เลย
-        if st.session_state.calc_display == "0" and char != ".":
-            st.session_state.calc_display = char
-        # ป้องกันจุดซ้ำ
-        elif char == "." and "." in st.session_state.calc_display:
-            pass
-        else:
-            st.session_state.calc_display += char
-        st.session_state.calc_input = st.session_state.calc_display
-
-    def handle_operator(op):
-        # กันไม่ให้กด operator ซ้ำติดกัน (เช็คตัวสุดท้าย)
-        if st.session_state.calc_display[-1] not in ['+', '-', '×', '÷']:
-            st.session_state.calc_display += op
-            st.session_state.calc_input = st.session_state.calc_display
-
-    def calculate_result():
-        try:
-            expression = st.session_state.calc_input.replace("×", "*").replace("÷", "/")
-            # คำนวณ
-            result = eval(expression)
-            # ถ้าเป็นทศนิยมยาวๆ ให้ปัดเศษหน่อยก็ดี (Optional)
-            if isinstance(result, float):
-                result = round(result, 4)
-            st.session_state.calc_display = str(result)
-            st.session_state.calc_input = str(result)
-        except:
-            st.session_state.calc_display = "Error"
-            st.session_state.calc_input = "0"
-
-    def clear_display():
-        st.session_state.calc_display = "0"
-        st.session_state.calc_input = "0"
-        
-    def delete_last():
-        current = st.session_state.calc_display
-        if len(current) > 1:
-            st.session_state.calc_display = current[:-1]
-        else:
-            st.session_state.calc_display = "0"
-        st.session_state.calc_input = st.session_state.calc_display
-
-    # --- 3. UI Layout ---
-    st.text_input(
-        "Display", 
-        value=st.session_state.calc_display,
-        key="calc_widget_display",
-        disabled=True,
-        label_visibility="collapsed"
-    )
-    
-    # Grid Layout (4x4)
-    c1, c2, c3, c4 = st.columns(4)
-    
-    with c1:
-        st.button("7", on_click=handle_input, args=("7",), use_container_width=True)
-        st.button("4", on_click=handle_input, args=("4",), use_container_width=True)
-        st.button("1", on_click=handle_input, args=("1",), use_container_width=True)
-        st.button("0", on_click=handle_input, args=("0",), use_container_width=True)
-
-    with c2:
-        st.button("8", on_click=handle_input, args=("8",), use_container_width=True)
-        st.button("5", on_click=handle_input, args=("5",), use_container_width=True)
-        st.button("2", on_click=handle_input, args=("2",), use_container_width=True)
-        st.button(".", on_click=handle_input, args=(".",), use_container_width=True)
-
-    with c3:
-        st.button("9", on_click=handle_input, args=("9",), use_container_width=True)
-        st.button("6", on_click=handle_input, args=("6",), use_container_width=True)
-        st.button("3", on_click=handle_input, args=("3",), use_container_width=True)
-        st.button("=", on_click=calculate_result, use_container_width=True, type="primary")
-
-    with c4:
-        st.button("C", on_click=clear_display, use_container_width=True)
-        st.button("DEL", on_click=delete_last, use_container_width=True)
-        st.button("+", on_click=handle_operator, args=("+",), use_container_width=True)
-        st.button("-", on_click=handle_operator, args=("-",), use_container_width=True)
-    
-    # แถวเสริมสำหรับ * และ / (เนื่องจากพื้นที่ไม่พอใน 4x4)
-    c5, c6 = st.columns(2)
-    c5.button("×", on_click=handle_operator, args=("×",), use_container_width=True)
-    c6.button("÷", on_click=handle_operator, args=("÷",), use_container_width=True)
-
-# ==============================================================================
-#                      MAIN LOGIC: SITUATION HANDLER (แผนการเทรดแบบใหม่)
+#                      MAIN LOGIC: SITUATION HANDLER
 # ==============================================================================
 
 def render_checklist_section(supabase: Client):
     with st.expander("🛡️ Trade Management Assistant (ผู้ช่วยคุมวินัย)", expanded=True):
         
-        col_main, col_tools = st.columns([2, 1])
+        # แบ่งหน้าจอ: ซ้าย (จัดการเทรด) / ขวา (ประวัติล่าสุด)
+        col_main, col_history = st.columns([2, 1])
 
+        # --- LEFT: MANAGEMENT ---
         with col_main:
             st.markdown("### 🚦 ตอนนี้คุณอยู่ในสถานการณ์ไหน?")
             
-            # 1. เลือกสถานการณ์ปัจจุบัน
             situation = st.radio(
                 "เลือกสถานะปัจจุบันเพื่อรับแผนรับมือ:",
                 [
@@ -129,10 +33,10 @@ def render_checklist_section(supabase: Client):
 
             st.divider()
 
-            # 2. แสดงแผนการตามสถานการณ์ (Logic Map)
-            decision_note = "" # ตัวแปรสำหรับเก็บข้อความที่จะบันทึก
+            decision_note = ""
             is_ready_to_log = False
 
+            # --- Logic การตัดสินใจ ---
             if "1. กำลังหาจังหวะเข้า" in situation:
                 st.info("🟦 **Phase: Pre-Trade Checklist**")
                 st.markdown("เช็คให้ชัวร์ก่อนกด ถ้าไม่ครบ **'ห้ามเข้า'**")
@@ -147,7 +51,7 @@ def render_checklist_section(supabase: Client):
                 else:
                     st.warning("⚠️ เงื่อนไขยังไม่ครบ: นั่งทับมือไว้ก่อน")
 
-            elif "2. เข้าออเดอร์แล้ว" in situation: # Zone A
+            elif "2. เข้าออเดอร์แล้ว" in situation:
                 st.warning("🟨 **Phase: Zone A (โซนวัดใจ)**")
                 st.markdown("""
                 **กฎเหล็ก:** ห้ามทำอะไรทั้งสิ้น!
@@ -160,7 +64,7 @@ def render_checklist_section(supabase: Client):
                     decision_note = "Zone A: ถือครองออเดอร์ตามแผน ไม่แทรกแซง"
                     is_ready_to_log = True
 
-            elif "3. กำไรแล้ว" in situation: # Zone B
+            elif "3. กำไรแล้ว" in situation:
                 st.success("🟩 **Phase: Zone B (โซนปลอดภัย)**")
                 st.markdown("""
                 **Action Required:** ปกป้องทุนเดี๋ยวนี้!
@@ -175,7 +79,7 @@ def render_checklist_section(supabase: Client):
                 else:
                     st.error("ระวัง! กำไรอาจกลายเป็นขาดทุนได้")
 
-            elif "4. กำไรใกล้ถึงเป้า" in situation: # Zone C
+            elif "4. กำไรใกล้ถึงเป้า" in situation:
                 st.success("💰 **Phase: Zone C (Harvest Time)**")
                 st.markdown("""
                 **Action Required:** อย่าโลภ! ตลาดให้เงินต้องเก็บ
@@ -187,7 +91,7 @@ def render_checklist_section(supabase: Client):
                     decision_note = "Zone C Action: ล็อคกำไร/แบ่งปิด ตามแผน ลดความโลภ"
                     is_ready_to_log = True
 
-            elif "5. เพิ่งปิดออเดอร์" in situation: # Post-Trade
+            elif "5. เพิ่งปิดออเดอร์" in situation:
                 st.error("🛑 **Phase: Cool Down (พักก่อน)**")
                 st.markdown("""
                 - ถ้า **กำไร**: อย่าห้าว เดี๋ยวคืนตลาด -> พัก 15 นาที
@@ -206,22 +110,19 @@ def render_checklist_section(supabase: Client):
                     decision_note = f"Post-Trade: หยุดเทรดชั่วคราวเนื่องจาก {state}"
                     is_ready_to_log = True
 
-            # 3. ส่วนบันทึก (Logging) - ใช้ Supabase เดิม
+            # --- LOGGING ---
             st.markdown("---")
             with st.form("action_logger"):
                 pair = st.text_input("คู่เงิน (Pair)", placeholder="e.g. XAUUSD")
-                # เอา decision_note มาใส่ใน notes อัตโนมัติ
                 user_note = st.text_area("บันทึกเพิ่มเติม", value=decision_note, help="แผนหรือการตัดสินใจที่เลือกไว้จะถูกบันทึกที่นี่")
                 img = st.text_input("รูปภาพ (Optional)")
                 
-                # ปุ่มบันทึก
                 submitted = st.form_submit_button("💾 ยืนยันการตัดสินใจ (Record Action)", disabled=not is_ready_to_log, type="primary")
                 
                 if submitted and is_ready_to_log:
                     try:
                         active_pid = st.session_state.get('active_portfolio_id_gs')
                         if active_pid:
-                            # ใช้โครงสร้างเดิมของ Supabase
                             supabase.table("trades").insert({
                                 "portfolio_id": active_pid,
                                 "pair": pair if pair else "N/A",
@@ -230,16 +131,14 @@ def render_checklist_section(supabase: Client):
                                 "created_at": datetime.now().isoformat()
                             }).execute()
                             st.success("บันทึกการตัดสินใจเรียบร้อย! ทำตามแผนต่อไป")
+                            st.rerun() # รีเฟรชหน้าจอเพื่ออัปเดต History
                         else:
                             st.error("กรุณาเลือก Portfolio ก่อน")
                     except Exception as e:
                         st.error(f"บันทึกไม่สำเร็จ: {e}")
 
-        # --- RIGHT COLUMN: TOOLS ---
-        with col_tools:
-            st.caption("🧮 Calculator")
-            render_calculator() # ใช้เวอร์ชันเก่าที่เสถียรแล้ว
-            st.divider()
+        # --- RIGHT: HISTORY ---
+        with col_history:
             st.caption("📜 History (Last 5 Actions)")
             
             try:
@@ -249,8 +148,11 @@ def render_checklist_section(supabase: Client):
                     if res.data:
                         for item in res.data:
                             t = pd.to_datetime(item['created_at']).strftime('%H:%M')
-                            st.text(f"[{t}] {item.get('pair','-')}")
-                            st.caption(f"{item.get('notes')[:40]}...") 
+                            p = item.get('pair') if item.get('pair') else "-"
+                            st.markdown(f"**{t}** | `{p}`")
+                            st.caption(f"{item.get('notes')}") 
                             st.divider()
+                    else:
+                        st.info("No history found.")
             except:
-                st.caption("No history.")
+                st.caption("Loading history...")
