@@ -137,22 +137,3 @@ def render_checklist_section(supabase: Client):
                     except Exception as e:
                         st.error(f"บันทึกไม่สำเร็จ: {e}")
 
-        # --- RIGHT: HISTORY ---
-        with col_history:
-            st.caption("📜 History (Last 5 Actions)")
-            
-            try:
-                pid = st.session_state.get('active_portfolio_id_gs')
-                if pid:
-                    res = supabase.table("trades").select("pair, notes, created_at").eq("portfolio_id", pid).order("created_at", desc=True).limit(5).execute()
-                    if res.data:
-                        for item in res.data:
-                            t = pd.to_datetime(item['created_at']).strftime('%H:%M')
-                            p = item.get('pair') if item.get('pair') else "-"
-                            st.markdown(f"**{t}** | `{p}`")
-                            st.caption(f"{item.get('notes')}") 
-                            st.divider()
-                    else:
-                        st.info("No history found.")
-            except:
-                st.caption("Loading history...")
