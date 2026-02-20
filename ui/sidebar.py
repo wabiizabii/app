@@ -131,4 +131,4 @@ def render_sidebar():
             col_c, col_d = st.columns(2)
             with col_c: st.number_input("Current P/L ($)", value=0.0, format="%.2f", key="sidebar_con_total_pl")
             with col_d: st.number_input("Consistency (%)", value=0.0, format="%.2f", key="sidebar_con_consistency_pct")
-            st.selectbox("เกณฑ์ของกฎ (%)", options=[19.99, 20.0, 30.0, 40.0, 50.0], key="sidebar_con_rule")
+            st.selectbox("เกณฑ์ของกฎ (%)", options=[20.0, 30.0, 40.0, 50.0], key="sidebar_con_rule")

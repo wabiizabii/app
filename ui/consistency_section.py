@@ -170,7 +170,7 @@ def render_consistency_section():
         # ส่วนอื่นๆ ให้ตรงกับ Sidebar
         total_pl = st.session_state.get('sidebar_con_total_pl', 0.0)
         consistency_percent = st.session_state.get('sidebar_con_consistency_pct', 0.0)
-        rule_threshold = st.session_state.get('sidebar_con_rule', 19.99)
+        rule_threshold = st.session_state.get('sidebar_con_rule', 50)
         
         # --- Logic การสลับโหมด (คงเดิม) ---
         if total_pl > 0:
