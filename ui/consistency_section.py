@@ -82,12 +82,14 @@ def render_analysis_section(initial_balance, profit_target_pct, total_pl, consis
 
 
 def render_planning_section(initial_balance, profit_target_pct, rule_threshold, current_pl):
-    """แสดงผลส่วนวางแผนล่วงหน้า พร้อม UI ที่ปรับปรุงใหม่"""
+    """แสดงผลส่วนวางแผนล่วงหน้า (Fixed Target Version)"""
     
+    # 1. คำนวณเป้าหมาย Challenge (ค่าคงที่)
     challenge_profit_target_usd = initial_balance * (profit_target_pct / 100)
 
     if current_pl < 0:
-        st.error(f"**สถานะปัจจุบัน:** กำลังขาดทุนสุทธิอยู่ **${current_pl:,.2f}**"); return
+        st.error(f"**สถานะปัจจุบัน:** กำลังขาดทุนสุทธิอยู่ **${current_pl:,.2f}**")
+        return
 
     st.success("**สถานะปัจจุบัน:** ยังไม่มีกำไร (P/L = $0.00)")
     st.info(f"**เป้าหมายกำไรของ Challenge นี้คือ:** **${challenge_profit_target_usd:,.2f}**")
@@ -95,6 +97,7 @@ def render_planning_section(initial_balance, profit_target_pct, rule_threshold, 
     
     st.subheader("วางแผนการเทรดของคุณ (Trading Plan)")
 
+    # 2. รับค่าจำนวนวัน
     plan_col1, _ = st.columns([1, 3])
     with plan_col1:
         days_to_target = st.number_input(
@@ -105,23 +108,48 @@ def render_planning_section(initial_balance, profit_target_pct, rule_threshold, 
             key=f"plan_days_{initial_balance}_{profit_target_pct}"
         )
 
-    avg_profit_needed_base = challenge_profit_target_usd / days_to_target if days_to_target > 0 else 0
-    consistency_target_usd = avg_profit_needed_base / (rule_threshold / 100) if rule_threshold > 0 else float('inf')
-    final_target = max(challenge_profit_target_usd, consistency_target_usd)
-    final_avg_profit_per_day = final_target / days_to_target if days_to_target > 0 else 0
-    safe_speed_limit = final_target * (rule_threshold / 100) if rule_threshold > 0 else 0
+    # 3. คำนวณแบบตรงไปตรงมา (Target คงที่)
+    # เป้าหมายสุดท้ายยึดตาม Challenge เสมอ ไม่บวมตามกฎ
+    final_target = challenge_profit_target_usd 
+    
+    # กำไรเฉลี่ยต่อวันที่ต้องทำ
+    avg_profit_per_day = final_target / days_to_target if days_to_target > 0 else 0
+    
+    # ขีดจำกัดสูงสุดต่อวันที่ห้ามเกิน (Speed Limit) ตามกฎ Consistency ของเป้าหมายนั้น
+    safe_speed_limit = final_target * (rule_threshold / 100) if rule_threshold > 0 else float('inf')
+    
+    # 4. ตรวจสอบว่าแผนนี้เป็นไปได้หรือไม่
+    is_plan_violation = avg_profit_per_day > safe_speed_limit
     
     st.markdown("---")
-    
     st.markdown("##### **ผลการวิเคราะห์แผน:**")
     
     res_col1, res_col2 = st.columns(2)
     with res_col1:
-        st.metric(label="เป้าหมายสุดท้ายที่แท้จริงของคุณ", value=f"${final_target:,.2f}")
+        st.metric(label="เป้าหมายสุดท้ายของ Challenge", value=f"${final_target:,.2f}")
     with res_col2:
-        st.metric(label=f"คุณต้องทำกำไรเฉลี่ยวันละ", value=f"${final_avg_profit_per_day:,.2f}")
+        # แสดงค่ากำไรต่อวัน ถ้าผิดกฎให้เป็นสีแดง
+        color_delta = "normal" if not is_plan_violation else "inverse" 
+        st.metric(
+            label="คุณต้องทำกำไรเฉลี่ยวันละ", 
+            value=f"${avg_profit_per_day:,.2f}",
+            delta="⚠️ สูงเกินกฎกำหนด" if is_plan_violation else None,
+            delta_color=color_delta
+        )
 
-    st.warning(f"**กฎเหล็กของคุณ (Your Speed Limit):** เพื่อให้แผนนี้สำเร็จ ห้ามทำกำไรเกิน **${safe_speed_limit:,.2f}** ต่อวัน")
+    # 5. แสดงผลสรุป / คำเตือน
+    limit_container = st.container(border=True)
+    if is_plan_violation:
+        limit_container.error(f"🚨 **แผนนี้เสี่ยงสอบตก!** (Violation Alert)")
+        limit_container.write(f"การทำกำไรวันละ **${avg_profit_per_day:,.2f}** จะคิดเป็น **{((avg_profit_per_day/final_target)*100):.1f}%** ของกำไรเป้าหมาย")
+        limit_container.write(f"ซึ่งเกินกว่ากฎ Consistency ที่กำหนดไว้ **{rule_threshold}%** (ห้ามเกิน ${safe_speed_limit:,.2f})")
+        
+        # แนะนำจำนวนวันที่ปลอดภัย
+        min_days_safe = math.ceil(final_target / safe_speed_limit)
+        limit_container.warning(f"💡 **คำแนะนำ:** ควรเพิ่มจำนวนวันเทรดอย่างน้อยเป็น **{min_days_safe} วัน** เพื่อให้ผ่านกฎ")
+    else:
+        limit_container.success(f"✅ **แผนนี้ผ่านฉลุย! (Safe Plan)**")
+        limit_container.write(f"กฎเหล็กของคุณ (Speed Limit): ห้ามทำกำไรเกิน **${safe_speed_limit:,.2f}** ต่อวัน")
 
 # ==============================================================================
 #                          ฟังก์ชันหลักที่เรียกใช้งาน (แก้ไขแล้ว)
