@@ -1,4 +1,4 @@
-# ui/topstep_section.py (เวอร์ชันเต็มสมบูรณ์: Integrated Risk)
+# ui/topstep_section.py (เวอร์ชันเต็มสมบูรณ์: Real-time Risk Integration)
 
 import streamlit as st
 from config import settings
@@ -16,7 +16,7 @@ def get_micro_version(symbol):
 def render_topstep_section():
     """
     แสดงผล Section เครื่องมือวางแผนการเทรดแบบ Universal (Futures & Forex)
-    *** อัปเกรด: ดึงค่าความเสี่ยงจาก Sidebar มาเป็นค่าเริ่มต้น ***
+    *** อัปเกรด: คำนวณความเสี่ยงจาก Sidebar แบบ Real-time ***
     """
     with st.expander("Universal Trade Planner", expanded=True):
         
@@ -28,8 +28,21 @@ def render_topstep_section():
         )
         st.divider()
 
-        # --- ดึงค่าความเสี่ยงที่คำนวณจาก Sidebar มาเตรียมไว้ ---
-        default_risk = st.session_state.get('calculated_risk_usd', 100.0)
+        # --- START: โค้ดส่วนแก้ไขที่สำคัญที่สุด ---
+        
+        # 1. ดึง "วัตถุดิบ" จาก session_state ที่ Sidebar เป็นคนกำหนด
+        # ใช้ .get() พร้อมค่า default เพื่อป้องกัน error หาก session_state ยังไม่ถูกสร้าง
+        balance_from_sidebar = st.session_state.get('current_account_balance', 10000.0) 
+        percent_from_sidebar = st.session_state.get('risk_calc_percent', 0.9) 
+        
+        # 2. คำนวณ "ค่าความเสี่ยงเริ่มต้น" ที่ถูกต้องภายใน Section นี้เลย
+        try:
+            # ใช้ float() เพื่อให้แน่ใจว่าเป็นตัวเลขทศนิยมก่อนคำนวณ
+            risk_value_from_sidebar = float(balance_from_sidebar) * (float(percent_from_sidebar) / 100)
+        except (ValueError, TypeError):
+            risk_value_from_sidebar = 100.0 # ค่าสำรองหากเกิดข้อผิดพลาด
+            
+        # --- END: สิ้นสุดโค้ดส่วนแก้ไข ---
 
         # ========================== UI & LOGIC สำหรับ FUTURES ==========================
         if asset_type == "Futures":
@@ -42,9 +55,9 @@ def render_topstep_section():
                      risk_usd = st.number_input(
                          "ความเสี่ยงที่ยอมรับได้ ($)", 
                          min_value=1.0, 
-                         value=default_risk, 
+                         value=risk_value_from_sidebar, 
                          step=10.0, 
-                         help="งบขาดทุนของคุณสำหรับเทรดนี้", 
+                         help="ค่าเริ่มต้นมาจาก Risk Sizing Calculator ใน Sidebar", 
                          key="futures_risk"
                      )
                 with form_col2:
@@ -110,13 +123,14 @@ def render_topstep_section():
                 except Exception as e:
                     st.error(f"เกิดข้อผิดพลาด [Futures]: {e}")
 
+        # ========================== UI & LOGIC สำหรับ FOREX/CFD ========================
         elif asset_type == "Forex / CFD":
             st.subheader("💹 Forex / CFD Trade Planner")
             with st.container(border=True):
                 st.markdown("**1. กรอกแผนการเทรดของคุณ (Idea)**")
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    risk_usd_forex = st.number_input("ความเสี่ยงที่ยอมรับได้ ($)", 1.0, value=default_risk, step=10.0, key="forex_risk")
+                    risk_usd_forex = st.number_input("ความเสี่ยงที่ยอมรับได้ ($)", 1.0, value=risk_value_from_sidebar, step=10.0, key="forex_risk")
                 with col2:
                     if hasattr(settings, 'FOREX_POINT_VALUES'):
                         forex_symbols = sorted(list(settings.FOREX_POINT_VALUES.keys()))

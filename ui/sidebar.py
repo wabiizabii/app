@@ -64,9 +64,15 @@ def render_sidebar():
                     st.session_state['sidebar_con_target_pct'] = float(new_target)
                     st.session_state['current_account_balance'] = new_balance
                     st.session_state['active_profit_target_pct'] = new_target
-                    
-                st.session_state['current_portfolio_details'] = None 
-                st.session_state['latest_statement_equity'] = None
+
+                    new_rule = safe_float_convert(row.iloc[0].get('ConsistencyRulePercent'), 50.0)
+                    if new_rule == 0.0: new_rule = 50.0 # Fallback
+                    st.session_state['active_consistency_rule'] = float(new_rule)
+
+                st.session_state['risk_calc_balance'] = float(new_balance)
+                st.session_state['sidebar_con_balance'] = float(new_balance)
+                st.session_state['sidebar_con_target_pct'] = float(new_target)
+                st.session_state['sidebar_con_rule'] = float(new_rule)
 
         st.selectbox(
             "Select Portfolio:", 

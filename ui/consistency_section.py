@@ -158,22 +158,27 @@ def render_planning_section(initial_balance, profit_target_pct, rule_threshold, 
 def render_consistency_section():
     with st.expander("📅 Profit Consistency Planner & Analyzer", expanded=True):
         
-        # 1. ดึงค่าจาก Sidebar (ต้องใช้ Key ให้ตรงกับใน ui/sidebar.py)
-        # ใช้ 'sidebar_con_balance' แทน 'consistency_initial_balance'
+        # --- START: แก้ไขส่วนนี้ทั้งหมด ---
+
+        # 1. ดึงค่าจาก Sidebar (ใช้ Key ที่ถูกต้อง)
         initial_balance = st.session_state.get('sidebar_con_balance', 
                           st.session_state.get('current_account_balance', 10000.0))
         
-        # ใช้ 'sidebar_con_target_pct' แทน 'consistency_profit_target_pct'
         profit_target_pct = st.session_state.get('sidebar_con_target_pct', 
                             st.session_state.get('active_profit_target_pct', 10.0))
         
-        # ส่วนอื่นๆ ให้ตรงกับ Sidebar
         total_pl = st.session_state.get('sidebar_con_total_pl', 0.0)
         consistency_percent = st.session_state.get('sidebar_con_consistency_pct', 0.0)
-        rule_threshold = st.session_state.get('sidebar_con_rule', 50)
+        
+        # ดึงค่า Rule ที่ถูกต้องจาก session_state
+        rule_threshold = st.session_state.get('sidebar_con_rule', 50.0)
+        
+        # --- END: สิ้นสุดการแก้ไข ---
         
         # --- Logic การสลับโหมด (คงเดิม) ---
         if total_pl > 0:
+            st.caption("โหมด: วิเคราะห์สถานะปัจจุบัน (Analyze Mode)")
             render_analysis_section(initial_balance, profit_target_pct, total_pl, consistency_percent, rule_threshold)
         else:
+            st.caption("โหมด: วางแผนล่วงหน้า (Planning Mode)")
             render_planning_section(initial_balance, profit_target_pct, rule_threshold, total_pl)

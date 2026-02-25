@@ -137,7 +137,23 @@ def _render_portfolio_form(is_edit_mode, db_handler_instance, df_portfolios_gs, 
             f_pf_col1, f_pf_col2 = st.columns(2)
             with f_pf_col1: prop_leverage_widget = st.number_input("Leverage", value=safe_float_convert(portfolio_to_edit_data.get("Leverage", 100.0)), format="%.0f", key=f"{key_prefix}_prop_leverage")
             with f_pf_col2: prop_min_days_widget = st.number_input("Min. Trading Days", value=int(safe_float_convert(portfolio_to_edit_data.get("MinTradingDays", 0))), step=1, key=f"{key_prefix}_prop_min_days")
+
+            st.markdown("###### Consistency & Other Rules:")
+            f_pf_extra1, f_pf_extra2, f_pf_extra3 = st.columns(3)
+            with f_pf_extra1:
+                prop_consistency_rule_widget = st.number_input(
+                    "Consistency Rule %",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=safe_float_convert(portfolio_to_edit_data.get("ConsistencyRulePercent", 50.0)),
+                    step=5.0,
+                    format="%.1f",
+                    key=f"{key_prefix}_prop_consistency"
+                )
+            with f_pf_extra2: prop_leverage_widget = st.number_input(...)
+            with f_pf_extra3: prop_min_days_widget = st.number_input(...)
         
+
         st.markdown("**Scaling Manager Settings (Optional):**")
         enable_scaling_checkbox_val = st.checkbox("Enable Scaling Manager?", value=str(portfolio_to_edit_data.get("EnableScaling", "False")).upper() == 'TRUE', key=f"{key_prefix}_scaling_cb")
         
