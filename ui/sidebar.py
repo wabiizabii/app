@@ -130,7 +130,7 @@ def render_sidebar():
         with st.expander("Profit Consistency Planner", expanded=True):
             col_a, col_b = st.columns(2)
             with col_a:
-                st.number_input("Initial Balance ($)", 0.0, value=float(st.session_state.get('sidebar_con_balance', active_balance_to_use)), format="%.2f", key="sidebar_con_balance")
+                st.number_input("Initial Balance ($)", 1.0, value=float(st.session_state.get('sidebar_con_balance', active_balance_to_use)), format="%.2f", key="sidebar_con_balance")
             with col_b:
                 st.number_input("Profit Target (%)", 1.0, value=float(st.session_state.get('sidebar_con_target_pct', active_profit_target_pct)), format="%.1f", key="sidebar_con_target_pct")
             
