@@ -128,11 +128,20 @@ def render_sidebar():
         st.subheader("🧮 Prop Firm Tools")
 
         with st.expander("Profit Consistency Planner", expanded=True):
+            # ตรวจสอบค่าความปลอดภัยล่วงหน้า เพื่อป้องกันการเด้งพังกรณีข้อมูลในพอร์ตเป็น 0 หรือว่างเปล่า
+            safe_balance = float(st.session_state.get('sidebar_con_balance', active_balance_to_use))
+            if safe_balance < 1.0:
+                safe_balance = 1.0
+
+            safe_target_pct = float(st.session_state.get('sidebar_con_target_pct', active_profit_target_pct))
+            if safe_target_pct < 1.0:
+                safe_target_pct = 1.0
+
             col_a, col_b = st.columns(2)
             with col_a:
-                st.number_input("Initial Balance ($)", 1.0, value=float(st.session_state.get('sidebar_con_balance', active_balance_to_use)), format="%.2f", key="sidebar_con_balance")
+                st.number_input("Initial Balance ($)", 1.0, value=safe_balance, format="%.2f", key="sidebar_con_balance")
             with col_b:
-                st.number_input("Profit Target (%)", 1.0, value=float(st.session_state.get('sidebar_con_target_pct', active_profit_target_pct)), format="%.1f", key="sidebar_con_target_pct")
+                st.number_input("Profit Target (%)", 1.0, value=safe_target_pct, format="%.1f", key="sidebar_con_target_pct")
             
             col_c, col_d = st.columns(2)
             with col_c: st.number_input("Current P/L ($)", value=0.0, format="%.2f", key="sidebar_con_total_pl")
