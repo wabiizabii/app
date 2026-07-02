@@ -94,8 +94,7 @@ def render_ai_section():
                     else:
                         st.info("ไม่พบข้อมูลสำหรับสร้างกราฟ Balance Curve")
             except Exception as e:
-                st.error("❌ เกิดข้อผิดพลาดระหว่างการวิเคราะห์ 'ผลการเทรดจริง'")
-                st.exception(e)
+                st.warning("🤖 ไม่พบประวัติผลการเทรดจริงในพอร์ตนี้ หรือระบบวิเคราะห์ข้อมูล (Analytics Engine) ยังไม่พร้อมใช้งานชั่วคราวครับ")
 
         # --- Combined Analysis Tab with Error Handling ---
         with tab3:
