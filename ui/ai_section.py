@@ -64,8 +64,7 @@ def render_ai_section():
                 else:
                     st.info("ไม่พบข้อมูลแผนเทรดสำหรับ AI Assistant")
             except Exception as e:
-                st.error("❌ เกิดข้อผิดพลาดระหว่างการวิเคราะห์ 'แผนการเทรด'")
-                st.exception(e)
+                st.warning("🤖 ไม่พบประวัติแผนการเทรดในพอร์ตนี้ หรือระบบวิเคราะห์ข้อมูล (Analytics Engine) ยังไม่พร้อมใช้งานชั่วคราวครับ")
 
         # --- Actual Analysis Tab with Error Handling ---
         with tab2:
