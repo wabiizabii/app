@@ -41,6 +41,9 @@ def render_topstep_section():
             risk_value_from_sidebar = float(balance_from_sidebar) * (float(percent_from_sidebar) / 100)
         except (ValueError, TypeError):
             risk_value_from_sidebar = 100.0 # ค่าสำรองหากเกิดข้อผิดพลาด
+
+        if risk_value_from_sidebar < 1.0:
+            risk_value_from_sidebar = 1.0 
             
         # --- END: สิ้นสุดโค้ดส่วนแก้ไข ---
 
